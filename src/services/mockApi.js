@@ -158,7 +158,8 @@ const handlers = {
   // WORKSPACES
   'GET /workspaces': async () => {
     await delay();
-    return ok(getWorkspaces());
+    const data = getWorkspaces();
+    return ok({ data, pagination: { total: data.length, page: 1, limit: 12, totalPages: 1 } });
   },
 
   'POST /workspaces': async ({ name, description }) => {
@@ -179,7 +180,8 @@ const handlers = {
   'GET /projects/workspace/:workspaceId': async (_, { workspaceId }) => {
     await delay();
     const all = getProjects();
-    return ok(all[workspaceId] || []);
+    const data = all[workspaceId] || [];
+    return ok({ data, pagination: { total: data.length, page: 1, limit: 12, totalPages: 1 } });
   },
 
   'POST /projects/workspace/:workspaceId': async ({ name }, { workspaceId }) => {
@@ -269,17 +271,18 @@ const handlers = {
 
   'GET /credits/payments': async () => {
     await delay();
-    return ok(SEED_PAYMENTS);
+    return ok({ data: SEED_PAYMENTS, pagination: { total: SEED_PAYMENTS.length, page: 1, limit: 20, totalPages: 1 } });
   },
 
   'GET /credits/usage': async () => {
     await delay();
-    return ok(SEED_USAGE.filter(u => u.type === 'debit'));
+    const data = SEED_USAGE.filter(u => u.type === 'debit');
+    return ok(data);
   },
 
   'GET /credits/history': async () => {
     await delay();
-    return ok(SEED_USAGE);
+    return ok({ data: SEED_USAGE, pagination: { total: SEED_USAGE.length, page: 1, limit: 20, totalPages: 1 } });
   },
 
   'POST /credits/order': async ({ plan_id }) => {
@@ -291,6 +294,49 @@ const handlers = {
   'POST /credits/verify': async () => {
     await delay();
     return ok({ message: 'Payment verified', credits: DEMO_USER.credits });
+  },
+
+  // WISHLIST
+  'GET /wishlist': async () => {
+    await delay();
+    const data = ls.get('wishlist', []);
+    return ok({ data, pagination: { total: data.length, page: 1, limit: 12, totalPages: 1 } });
+  },
+
+  'POST /wishlist': async (body) => {
+    await delay();
+    const list = ls.get('wishlist', []);
+    const item = { id: Date.now(), ...body, created_at: new Date().toISOString(), project_name: 'Demo Project' };
+    ls.set('wishlist', [...list, item]);
+    return ok(item);
+  },
+
+  'DELETE /wishlist/:id': async (_, { id }) => {
+    await delay();
+    ls.set('wishlist', ls.get('wishlist', []).filter(i => i.id !== Number(id)));
+    return ok({ message: 'Removed' });
+  },
+
+  'POST /wishlist/:id/use': async (_, { id }) => {
+    await delay();
+    return ok({ message: 'Video added successfully in Demo Project', project_name: 'Demo Project' });
+  },
+
+  // TRANSCRIPTION
+  'POST /projects/:projectId/transcribe': async () => {
+    await delay(2000);
+    return ok({ transcription: 'This is a mock transcription of your audio file. The AI has converted your speech to text successfully. You can edit this text before submitting.', status: 'completed' });
+  },
+
+  'GET /projects/:projectId/transcription': async () => {
+    await delay(300);
+    return ok({ transcription: null, status: 'draft' });
+  },
+
+  // AUTH LOGOUT
+  'POST /auth/logout': async () => {
+    await delay(200);
+    return ok({ message: 'Logged out successfully' });
   },
 };
 
