@@ -20,14 +20,31 @@ const AudioPreview = () => {
   const [audioFilesLoading, setAudioFilesLoading] = useState(initialAudioFiles.length === 0);
   const [projectName, setProjectName] = useState(location.state?.projectName || '');
 
-  // If no state was passed (e.g. page refresh), load audio URL + project name from the project record
+  // If no state was passed (e.g. page refresh), load audio files + project name from the project record
   useEffect(() => {
-    if (initialAudioFiles.length > 0 && projectName) return;
+    setAudioFilesLoading(true);
     api.get(`/projects/${projectId}`)
       .then(res => {
         if (!projectName) setProjectName(res.data.name || '');
-        if (initialAudioFiles.length === 0 && res.data.audio_url) {
-          setAudioFiles([{ name: 'Audio 1', url: res.data.audio_url }]);
+        
+        // Hydrate audio files from the new audio_files array
+        if (res.data.audio_files && res.data.audio_files.length > 0) {
+          const formatted = res.data.audio_files.map(a => ({
+            id: a.id,
+            name: a.file_name || 'Audio File',
+            url: a.audio_url,
+            transcription: a.transcription_text,
+            status: a.status
+          }));
+          setAudioFiles(formatted);
+          
+          // If the selected audio has a transcription, show it
+          const current = formatted[selectedAudio] || formatted[0];
+          if (current) {
+            setTranscription(current.transcription || '');
+            setEditedText(current.transcription || '');
+            setStatus(current.transcription ? 'completed' : current.status);
+          }
         }
       })
       .catch(console.error)
@@ -47,63 +64,132 @@ const AudioPreview = () => {
   const pollRef = useRef(null);
   const [durations, setDurations] = useState({});
 
-  // ── Start transcription & poll for result ─────────────────
-  const startTranscription = useCallback(async () => {
+  // ── Start transcription ─────────────────
+  const startTranscription = useCallback(async (index) => {
+    const audio = audioFiles[index];
+    if (!audio || !audio.id) return;
+
+    // Prevent multiple calls for the same audio
+    if (audio.status === 'processing') return;
+
     try {
-      const res = await api.post(`/projects/${projectId}/transcribe`);
+      if (index === selectedAudio) setStatus('processing');
+      
+      // Update local state to processing immediately
+      setAudioFiles(prev => {
+        const next = [...prev];
+        next[index] = { ...next[index], status: 'processing' };
+        return next;
+      });
+
+      const res = await api.post(`/projects/${projectId}/audio/${audio.id}/transcribe`);
+      
       if (res.data.status === 'completed') {
-        clearInterval(pollRef.current);
-        setTranscription(res.data.transcription);
-        setEditedText(res.data.transcription);
-        setStatus('completed');
-      }
-    } catch (err) {
-      console.error('Transcription error:', err);
-      clearInterval(pollRef.current);
-      setStatus('error');
-    }
-  }, [projectId]);
-
-  const pollTranscription = useCallback(async () => {
-    try {
-      const res = await api.get(`/projects/${projectId}/transcription`);
-      if (res.data.transcription) {
-        clearInterval(pollRef.current);
-        setTranscription(res.data.transcription);
-        setEditedText(res.data.transcription);
-        setStatus('completed');
-      }
-    } catch (err) {
-      console.error('Poll error:', err);
-      clearInterval(pollRef.current);
-      setStatus('error');
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    api.get(`/projects/${projectId}/transcription`)
-      .then(res => {
-        if (cancelled) return;
-        if (res.data.transcription) {
+        if (index === selectedAudio) {
           setTranscription(res.data.transcription);
           setEditedText(res.data.transcription);
           setStatus('completed');
-        } else {
-          // Start transcription — it returns synchronously from Whisper
-          startTranscription();
         }
-      })
-      .catch(() => {
-        if (!cancelled) startTranscription();
+        
+        // Update local state
+        setAudioFiles(prev => {
+          const next = [...prev];
+          next[index] = { ...next[index], transcription: res.data.transcription, status: 'completed' };
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error('Transcription error:', err);
+      if (index === selectedAudio) setStatus('error');
+      setAudioFiles(prev => {
+        const next = [...prev];
+        next[index] = { ...next[index], status: 'error' };
+        return next;
       });
+    }
+  }, [projectId, audioFiles, selectedAudio]);
 
-    return () => {
-      cancelled = true;
-      clearInterval(pollRef.current);
-    };
-  }, [projectId, startTranscription]);
+  const pollTranscription = useCallback(async (index) => {
+    const audio = audioFiles[index];
+    if (!audio || !audio.id) return;
+
+    try {
+      const res = await api.get(`/projects/${projectId}/audio/${audio.id}/transcription`);
+      if (res.data.status === 'completed' && res.data.transcription) {
+        if (index === selectedAudio) {
+          setTranscription(res.data.transcription);
+          setEditedText(res.data.transcription);
+          setStatus('completed');
+        }
+
+        // Update local state
+        setAudioFiles(prev => {
+          const next = [...prev];
+          next[index] = { ...next[index], transcription: res.data.transcription, status: 'completed' };
+          return next;
+        });
+      } else if (res.data.status === 'failed') {
+        if (index === selectedAudio) setStatus('error');
+        setAudioFiles(prev => {
+          const next = [...prev];
+          next[index] = { ...next[index], status: 'error' };
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error('Poll error:', err);
+    }
+  }, [projectId, audioFiles, selectedAudio]);
+
+  // ── Auto-start and central polling logic ──
+  
+  // 1. Update global preview state when selection changes
+  useEffect(() => {
+    const audio = audioFiles[selectedAudio];
+    if (!audio) return;
+
+    if (audio.transcription) {
+      setTranscription(audio.transcription);
+      setEditedText(audio.transcription);
+      setStatus('completed');
+    } else if (audio.status === 'processing') {
+      setStatus('processing');
+    } else if (audio.status === 'error' || audio.status === 'failed') {
+      setStatus('error');
+    } else {
+      setStatus('processing'); // assume starting soon
+    }
+  }, [selectedAudio, audioFiles]);
+
+  // 2. Start all pending transcriptions automatically
+  useEffect(() => {
+    audioFiles.forEach((audio, i) => {
+      if (audio.status === 'pending' || !audio.status) {
+        startTranscription(i);
+      }
+    });
+  }, [audioFiles.length]); // dependency on length to run once when files are loaded/hydrated
+
+  // 3. Central polling for all processing audios
+  useEffect(() => {
+    const processingIndices = audioFiles
+      .map((a, i) => (a.status === 'processing' && !a.transcription ? i : -1))
+      .filter(i => i !== -1);
+
+    if (processingIndices.length === 0) {
+      if (pollRef.current) clearInterval(pollRef.current);
+      return;
+    }
+
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => {
+      processingIndices.forEach(index => {
+        pollTranscription(index);
+      });
+    }, 3000);
+
+    return () => clearInterval(pollRef.current);
+  }, [audioFiles, pollTranscription]); // dependency on audioFiles.length to handle hydration
 
   const formatDuration = (s) => {
     if (!s || isNaN(s) || s === 0) return '--:--:--';

@@ -93,7 +93,8 @@ const ScriptEditor = () => {
       const res = await api.post(`/projects/${projectId}/upload-audio`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setAudioFile({ name: file.name, url: res.data.url });
+      // Store both name, url AND the new audioId from backend
+      setAudioFile({ id: res.data.audioId, name: file.name, url: res.data.url });
     } catch (err) {
       console.error('Audio upload failed:', err);
       const localUrl = URL.createObjectURL(file);
@@ -212,7 +213,7 @@ const ScriptEditor = () => {
               const res = await api.post(`/projects/${projectId}/upload-audio`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
               });
-              return { name: rec.name, url: res.data.url };
+              return { id: res.data.audioId, name: rec.name, url: res.data.url };
             } catch {
               return { name: rec.name, url: rec.url }; // fallback to local blob URL
             }
@@ -221,7 +222,7 @@ const ScriptEditor = () => {
 
         // Combine: uploaded file first, then all recordings
         const allAudioFiles = [
-          ...(audioFile ? [{ name: audioFile.name, url: audioFile.url }] : []),
+          ...(audioFile ? [audioFile] : []),
           ...uploadedRecordings,
         ];
 

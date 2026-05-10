@@ -55,7 +55,7 @@ const Login = () => {
     try {
       const res = await api.post('/auth/login', form);
       login(res.data.token, res.data.user);
-      navigate(res.data.onboardingDone ? '/dashboard' : '/onboarding/step1');
+      navigate('/dashboard');
     } catch (err) {
       const msg = err.response?.data?.message || 'Login failed !';
       if (err.response?.status === 403) {

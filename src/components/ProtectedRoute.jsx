@@ -36,6 +36,10 @@ const ProtectedRoute = ({ children }) => {
     return <Navigate to="/onboarding/step1" replace />;
   }
 
+  if (onboardingDone && isOnboardingRoute) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
   return children;
 };
 
