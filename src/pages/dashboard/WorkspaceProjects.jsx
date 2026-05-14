@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { MdAdd, MdMoreVert, MdDelete, MdEdit, MdCheckCircle, MdAccessTime, MdError } from 'react-icons/md';
+import { MdAdd, MdMoreVert, MdDelete, MdEdit, MdCheckCircle, MdAccessTime, MdError, MdPlayCircleOutline, MdAutorenew, MdRefresh } from 'react-icons/md';
 import { HiOutlineDocument } from 'react-icons/hi';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
@@ -9,10 +9,12 @@ import { useToast } from '../../context/ToastContext';
 import Pagination from '../../components/Pagination';
 
 const statusConfig = {
-  draft:       { label: 'Draft',       icon: <MdEdit size={13} />,        cls: 'text-gray-500 bg-gray-100' },
-  processing:  { label: 'Processing',  icon: <MdAccessTime size={13} />,  cls: 'text-yellow-600 bg-yellow-50' },
-  completed:   { label: 'Completed',   icon: <MdCheckCircle size={13} />, cls: 'text-green-600 bg-green-50' },
-  failed:      { label: 'Failed',      icon: <MdError size={13} />,       cls: 'text-red-600 bg-red-50' },
+  draft:           { label: 'Draft',           icon: <MdEdit size={13} />,               cls: 'text-gray-500 bg-gray-100' },
+  processing:      { label: 'Processing',      icon: <MdAutorenew size={13} className="animate-spin" />, cls: 'text-yellow-600 bg-yellow-50' },
+  questions_ready: { label: 'Ready',           icon: <MdPlayCircleOutline size={13} />,  cls: 'text-blue-600 bg-blue-50' },
+  in_progress:     { label: 'In Progress',     icon: <MdAccessTime size={13} />,         cls: 'text-indigo-600 bg-indigo-50' },
+  completed:       { label: 'Completed',       icon: <MdCheckCircle size={13} />,        cls: 'text-green-600 bg-green-50' },
+  failed:          { label: 'Failed',          icon: <MdError size={13} />,              cls: 'text-red-600 bg-red-50' },
 };
 
 const WorkspaceProjects = () => {
@@ -35,6 +37,10 @@ const WorkspaceProjects = () => {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const LIMIT = 12;
+  const [refreshing, setRefreshing] = useState(false);
+  // Bumped on each refresh click so the icon's animation key changes and the
+  // one-shot rotation replays even if clicks land back-to-back.
+  const [spinTick, setSpinTick] = useState(0);
 
   const fetchProjects = async (p = page) => {
     try {
@@ -50,6 +56,13 @@ const WorkspaceProjects = () => {
   };
 
   useEffect(() => { fetchProjects(page); }, [workspaceId, page]);
+
+  const handleManualRefresh = async () => {
+    setSpinTick(t => t + 1);
+    setRefreshing(true);
+    try { await fetchProjects(page); }
+    finally { setRefreshing(false); }
+  };
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -96,8 +109,16 @@ const WorkspaceProjects = () => {
     if (project.status === 'completed') {
       navigate(`/workspace/${workspaceId}/project/${project.id}/success`,
         { state: { workspaceName } });
-    } else if (project.status === 'processing') {
+    } else if (project.status === 'questions_ready' || project.status === 'in_progress') {
+      // Project is ready for (or mid-way through) Q&A.
       navigate(`/workspace/${workspaceId}/project/${project.id}/questions`,
+        { state: { workspaceName } });
+    } else if (project.status === 'processing') {
+      // Prep is still running — don't open Q&A yet.
+      toast('Still preparing your questions. Try again in a moment.', 'info');
+    } else if (project.status === 'failed') {
+      // Send the user back to the editor so they can re-submit.
+      navigate(`/workspace/${workspaceId}/project/${project.id}/editor`,
         { state: { workspaceName } });
     } else {
       // draft — let user choose upload type (PDF or Audio)
@@ -131,12 +152,22 @@ const WorkspaceProjects = () => {
             <h1 className="text-[22px] font-bold text-gray-900">{workspaceName}</h1>
             <p className="text-sm text-gray-500 mt-0.5">{projects.length} project{projects.length !== 1 ? 's' : ''}</p>
           </div>
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 h-[38px] px-5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition self-start sm:self-auto"
-          >
-            <MdAdd size={18} /> New Project
-          </button>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <button
+              onClick={handleManualRefresh}
+              disabled={refreshing}
+              className="flex items-center gap-2 h-[38px] px-4 border border-gray-300 hover:bg-gray-50 active:bg-gray-100 active:scale-95 disabled:opacity-60 text-gray-700 text-sm font-medium rounded-lg transition"
+            >
+              <MdRefresh key={spinTick} size={16} className={spinTick > 0 ? 'animate-spin-once' : ''} />
+              Refresh
+            </button>
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 h-[38px] px-5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition"
+            >
+              <MdAdd size={18} /> New Project
+            </button>
+          </div>
         </div>
 
         {/* Projects grid */}

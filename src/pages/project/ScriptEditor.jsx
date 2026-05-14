@@ -21,10 +21,9 @@ const ScriptEditor = () => {
   const [additionalNotes, setAdditionalNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // PDF state
-  const [pdfFile, setPdfFile] = useState(null);
+  // PDF state — multi-upload: any number of PDFs can be attached to a project
+  const [uploadedPdfs, setUploadedPdfs] = useState([]); // [{id, name, url, extractedText}]
   const [pdfUploading, setPdfUploading] = useState(false);
-  const [pdfUrl, setPdfUrl] = useState('');
   const pdfInputRef = useRef();
 
   // Audio state
@@ -40,23 +39,41 @@ const ScriptEditor = () => {
   const timerRef = useRef();
   const audioRefs = useRef([]);
 
-  // Load existing project data
+  // Load existing project data — single source of truth so re-entry shows what's already there
   useEffect(() => {
     api.get(`/projects/${projectId}`)
       .then(res => {
         if (res.data.script_text) setScriptText(res.data.script_text);
         if (res.data.additional_notes) setAdditionalNotes(res.data.additional_notes);
-        if (res.data.script_pdf_url) setPdfUrl(res.data.script_pdf_url);
+
+        if (uploadType === 'audio' && Array.isArray(res.data.audio_files) && res.data.audio_files.length > 0) {
+          setRecordings(res.data.audio_files.map(a => ({
+            id: a.id,
+            name: a.file_name || `Audio ${a.id}`,
+            url: a.audio_url,
+          })));
+        }
+
+        if (uploadType === 'pdf' && Array.isArray(res.data.documents)) {
+          setUploadedPdfs(res.data.documents.map(d => ({
+            id: d.id,
+            name: d.file_name || 'document.pdf',
+            url: d.pdf_url,
+            extractedText: d.extracted_text || '',
+            status: d.status || 'pending',
+          })));
+        }
       })
       .catch(console.error);
-  }, [projectId]);
+  }, [projectId, uploadType]);
 
-  // ── PDF handlers ──────────────────────────────────────────
+  // ── PDF handlers (multi-upload) ────────────────────────────
   const handlePdfSelect = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setPdfFile(file);
     handlePdfUpload(file);
+    // Reset the input so the same file can be re-selected if needed.
+    if (pdfInputRef.current) pdfInputRef.current.value = '';
   };
 
   const handlePdfUpload = async (file) => {
@@ -67,7 +84,13 @@ const ScriptEditor = () => {
       const res = await api.post(`/projects/${projectId}/upload-pdf`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setPdfUrl(res.data.url);
+      setUploadedPdfs(prev => [{
+        id: res.data.documentId,
+        name: res.data.fileName || file.name,
+        url: res.data.url,
+        extractedText: '',
+        status: 'processing',
+      }, ...prev]);
     } catch (err) {
       console.error('PDF upload failed:', err);
       toast('PDF upload failed. Only PDF files are allowed', 'error');
@@ -76,10 +99,59 @@ const ScriptEditor = () => {
     }
   };
 
-  const handleRemovePdf = () => {
-    setPdfFile(null);
-    setPdfUrl('');
-    if (pdfInputRef.current) pdfInputRef.current.value = '';
+  // Poll Python extraction for any PDFs that still need it. We key the effect on
+  // a stable string of pending ids so it only restarts when the *set* of
+  // pending docs changes — not on every per-doc state update.
+  const pendingExtractionIds = uploadedPdfs
+    .filter(d => !d.extractedText && d.status !== 'failed')
+    .map(d => d.id)
+    .join(',');
+
+  useEffect(() => {
+    if (!pendingExtractionIds) return;
+    const ids = pendingExtractionIds.split(',').map(Number);
+
+    const tick = async () => {
+      await Promise.all(ids.map(async (docId) => {
+        try {
+          const res = await api.get(`/projects/${projectId}/documents/${docId}/extraction`);
+          if (res.data.extracted_text || res.data.status === 'completed' || res.data.status === 'failed') {
+            setUploadedPdfs(prev => prev.map(p =>
+              p.id === docId
+                ? { ...p, extractedText: res.data.extracted_text || p.extractedText, status: res.data.status }
+                : p
+            ));
+          }
+        } catch (err) {
+          console.error('Extraction poll failed for doc', docId, err);
+        }
+      }));
+    };
+
+    // Poll once immediately so users don't wait a full interval after upload.
+    tick();
+    const interval = setInterval(tick, 3000);
+    return () => clearInterval(interval);
+  }, [pendingExtractionIds, projectId]);
+
+  // Concatenate every uploaded PDF's extracted text into the preview pane so
+  // multiple PDFs read as one continuous script.
+  const combinedPdfPreview = uploadedPdfs
+    .filter(d => d.extractedText)
+    .map(d => `--- ${d.name} ---\n${d.extractedText}`)
+    .join('\n\n');
+
+  const anyPdfExtracting = uploadedPdfs.some(d => !d.extractedText && d.status !== 'failed');
+  const anyPdfFailed = uploadedPdfs.some(d => d.status === 'failed');
+
+  const handleDeletePdf = async (docId) => {
+    try {
+      await api.delete(`/projects/${projectId}/documents/${docId}`);
+      setUploadedPdfs(prev => prev.filter(d => d.id !== docId));
+    } catch (err) {
+      console.error('Delete PDF failed:', err);
+      toast('Failed to delete PDF', 'error');
+    }
   };
 
   // ── Audio handlers ─────────────────────────────────────────
@@ -182,12 +254,12 @@ const ScriptEditor = () => {
 
   // ── Form completion check ───────────────────────────────────
   const isFormComplete = uploadType === 'pdf'
-    ? !!pdfUrl
+    ? uploadedPdfs.length > 0
     : (!!audioFile || recordings.length > 0);
 
   // ── Submit ──────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (uploadType === 'pdf' && !scriptText.trim() && !pdfUrl) {
+    if (uploadType === 'pdf' && !scriptText.trim() && uploadedPdfs.length === 0) {
       toast('Please upload a PDF or add script text before submitting', 'warning');
       return;
     }
@@ -268,37 +340,18 @@ const ScriptEditor = () => {
 
             {uploadType === 'pdf' ? (
               <>
-                {/* Upload zone */}
+                {/* Upload zone — always shows the drop-here state so the user can add more PDFs */}
                 <div>
                   <p className="font-normal text-lg leading-[130%] text-[#5D586C] mb-3">
                     Upload your script here <span className="text-[#EA4335]">*</span>
                   </p>
 
-                  {/* Dropzone */}
                   <div
-                    onClick={() => !pdfFile && pdfInputRef.current?.click()}
-                    className={`relative border-2 border-dashed rounded-[6px] h-[165px] flex flex-col items-center justify-center mb-9 transition
-                      ${pdfFile
-                        ? 'border-brand-color bg-[#F2F8FF] cursor-default'
-                        : 'border-brand-color bg-[#F2F8FF] cursor-pointer hover:bg-blue-50'
-                      }`}
+                    onClick={() => !pdfUploading && pdfInputRef.current?.click()}
+                    className="relative border-2 border-dashed rounded-[6px] h-[165px] flex flex-col items-center justify-center mb-6 transition border-brand-color bg-[#F2F8FF] cursor-pointer hover:bg-blue-50"
                   >
                     {pdfUploading ? (
                       <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                    ) : pdfFile ? (
-                      <>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleRemovePdf(); }}
-                        // className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 text-lg leading-none"
-                        >
-                          <img src="/assets/icons/pdf-delete.svg" alt="" className='cursor-pointer absolute top-2 right-2' />
-                        </button>
-                        <div className="flex flex-col items-center">
-                          <img src="/assets/icons/pdf-uploaded.svg" alt="" className='mb-[6px]' />
-                          <p className="text-xs font-normal text-[#00B215] mb-1">Uploaded</p>
-                          <p className="text-sm font-normal text-text-h2">{pdfFile.name}</p>
-                        </div>
-                      </>
                     ) : (
                       <>
                         <img src="/assets/icons/file-upload.svg" alt="" className="mb-[6px]" />
@@ -311,13 +364,43 @@ const ScriptEditor = () => {
                   <input ref={pdfInputRef} type="file" accept=".pdf" className="hidden" onChange={handlePdfSelect} />
                 </div>
 
-                {/* Upload Script button — blue filled, matches Figma */}
                 <button
                   onClick={() => pdfInputRef.current?.click()}
-                  className="self-start flex items-center gap-2 h-[38px] px-5 bg-brand-color hover:bg-blue-700 text-white text-[15px] leading-[18px] font-medium rounded-[6px] transition mb-[54px]"
+                  className="self-start flex items-center gap-2 h-[38px] px-5 bg-brand-color hover:bg-blue-700 text-white text-[15px] leading-[18px] font-medium rounded-[6px] transition mb-6"
                 >
                   <img src="/assets/icons/upload-script-plus.svg" alt="" /> Upload Script
                 </button>
+
+                {/* Uploaded PDFs list — mirrors the audio side's "uploaded files" list */}
+                {uploadedPdfs.length > 0 && (
+                  <div className="mb-6 space-y-2">
+                    <p className="font-normal text-sm leading-[130%] text-[#5D586C]">Uploaded PDFs</p>
+                    {uploadedPdfs.map(doc => (
+                      <div
+                        key={doc.id}
+                        className="flex items-center justify-between border border-[#D9E1EC] rounded-[6px] py-2 px-3.5 transition"
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          <BsFilePdf className="text-brand-color shrink-0" />
+                          <span className="text-sm font-medium text-text-h2 truncate">{doc.name}</span>
+                          {doc.status === 'processing' && !doc.extractedText && (
+                            <span className="text-xs text-[#B4B3B9] shrink-0">extracting…</span>
+                          )}
+                          {doc.status === 'failed' && (
+                            <span className="text-xs text-red-500 shrink-0">failed</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeletePdf(doc.id); }}
+                          className="cursor-pointer shrink-0"
+                          aria-label="Delete PDF"
+                        >
+                          <img src="/assets/icons/pdf-delete.svg" alt="" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Script text area */}
                 <div className="flex flex-col flex-1">
@@ -326,7 +409,7 @@ const ScriptEditor = () => {
                     value={scriptText}
                     onChange={(e) => setScriptText(e.target.value)}
                     className="flex-1 w-full px-4 py-3 border border-[#D9E1EC] rounded-[6px] font-normal text-[15px] leading-6 text-[#B4B3B9] placeholder-gray-400 focus:outline-none focus:border-brand-color focus:ring focus:ring-brand-color transition resize-none"
-                    style={{ minHeight: '636px' }}
+                    style={{ minHeight: '480px' }}
                   />
                 </div>
               </>
@@ -492,22 +575,40 @@ const ScriptEditor = () => {
             )}
           </div>
 
-          {/* ── RIGHT PANEL — Additional Notes / Audio Preview ── */}
+          {/* ── RIGHT PANEL — read-only preview of extracted text (audio transcript / PDF extract) ── */}
           <div className="flex-1 flex flex-col">
             <p className="font-normal text-lg leading-[130%] text-[#5D586C] mb-1">
-              {uploadType === 'audio' ? 'Preview text of audio Extract' : 'Add Additional Notes'}
+              {uploadType === 'audio' ? 'Preview text of audio Extract' : 'Preview text of PDF Extract'}
             </p>
-            <textarea
-              value={uploadType === 'audio' ? scriptText : additionalNotes}
-              onChange={(e) => uploadType === 'audio'
-                ? setScriptText(e.target.value)
-                : setAdditionalNotes(e.target.value)
-              }
-              placeholder={uploadType === 'audio' ? '' : 'Input text'}
-              readOnly={uploadType === 'audio'}
-              className="flex-1 w-full px-4 py-3 border border-[#D9E1EC] rounded-[6px] font-normal text-[15px] leading-6 text-[#B4B3B9] placeholder-gray-400 focus:outline-none focus:border-brand-color focus:ring focus:ring-brand-color transition resize-none"
-              style={{ minHeight: '560px' }}
-            />
+
+            {uploadType === 'audio' ? (
+              <textarea
+                value={scriptText}
+                onChange={(e) => setScriptText(e.target.value)}
+                readOnly
+                className="flex-1 w-full px-4 py-3 border border-[#D9E1EC] rounded-[6px] font-normal text-[15px] leading-6 text-[#B4B3B9] placeholder-gray-400 focus:outline-none focus:border-brand-color focus:ring focus:ring-brand-color transition resize-none"
+                style={{ minHeight: '560px' }}
+              />
+            ) : (
+              <div
+                className="flex-1 w-full px-4 py-3 border border-[#D9E1EC] rounded-[6px] font-normal text-[15px] leading-6 text-text-h2 bg-white overflow-auto whitespace-pre-wrap"
+                style={{ minHeight: '560px' }}
+              >
+                {uploadedPdfs.length === 0 && (
+                  <span className="text-[#B4B3B9]">Upload a PDF to see its extracted text preview here</span>
+                )}
+                {uploadedPdfs.length > 0 && !combinedPdfPreview && !anyPdfFailed && (
+                  <span className="text-[#B4B3B9]">Extracting text from PDF…</span>
+                )}
+                {combinedPdfPreview && combinedPdfPreview}
+                {anyPdfExtracting && combinedPdfPreview && (
+                  <span className="block mt-4 text-[#B4B3B9]">Extracting more PDFs…</span>
+                )}
+                {anyPdfFailed && (
+                  <span className="block mt-4 text-red-500">One or more PDFs failed to extract. Re-upload to retry.</span>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

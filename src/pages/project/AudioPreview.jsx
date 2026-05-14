@@ -11,41 +11,28 @@ const AudioPreview = () => {
   const { workspaceId, projectId } = useParams();
   const location = useLocation();
   const workspaceName = location.state?.workspaceName || 'my_workspace';
-  const initialAudioFiles = location.state?.audioFiles || [];   // passed from ScriptEditor
   const { toast } = useToast();
 
-  // Local copy of audio files — seeded from navigation state,
-  // then hydrated from the DB if the page is refreshed
-  const [audioFiles, setAudioFiles] = useState(initialAudioFiles);
-  const [audioFilesLoading, setAudioFilesLoading] = useState(initialAudioFiles.length === 0);
+  // Server is the source of truth — navigation state is no longer trusted, since the user
+  // can re-enter from the dashboard, refresh, or upload more audio between steps.
+  const [audioFiles, setAudioFiles] = useState([]);
+  const [audioFilesLoading, setAudioFilesLoading] = useState(true);
   const [projectName, setProjectName] = useState(location.state?.projectName || '');
 
-  // If no state was passed (e.g. page refresh), load audio files + project name from the project record
   useEffect(() => {
     setAudioFilesLoading(true);
     api.get(`/projects/${projectId}`)
       .then(res => {
         if (!projectName) setProjectName(res.data.name || '');
-        
-        // Hydrate audio files from the new audio_files array
-        if (res.data.audio_files && res.data.audio_files.length > 0) {
-          const formatted = res.data.audio_files.map(a => ({
-            id: a.id,
-            name: a.file_name || 'Audio File',
-            url: a.audio_url,
-            transcription: a.transcription_text,
-            status: a.status
-          }));
-          setAudioFiles(formatted);
-          
-          // If the selected audio has a transcription, show it
-          const current = formatted[selectedAudio] || formatted[0];
-          if (current) {
-            setTranscription(current.transcription || '');
-            setEditedText(current.transcription || '');
-            setStatus(current.transcription ? 'completed' : current.status);
-          }
-        }
+
+        const formatted = (res.data.audio_files || []).map(a => ({
+          id: a.id,
+          name: a.file_name || 'Audio File',
+          url: a.audio_url,
+          transcription: a.transcription_text,
+          status: a.status,
+        }));
+        setAudioFiles(formatted);
       })
       .catch(console.error)
       .finally(() => setAudioFilesLoading(false));
