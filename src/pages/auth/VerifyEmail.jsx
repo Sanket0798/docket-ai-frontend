@@ -60,7 +60,7 @@ const VerifyEmail = () => {
     try {
       const res = await api.post('/auth/verify-email', { userId, otp: otpString });
       login(res.data.token, res.data.user);
-      navigate('/get-started');
+      navigate('/dashboard');
     } catch (err) {
       setError(err.response?.data?.message || 'Invalid OTP');
     } finally {
