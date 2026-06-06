@@ -33,11 +33,12 @@ const Step3 = () => {
       sessionStorage.removeItem('ob_scenes');
       sessionStorage.removeItem('ob_ai_assistance');
       completeOnboarding();
-      navigate('/dashboard');
+      // Last onboarding screen: the 20-question Director Profiling questionnaire.
+      navigate('/director-profile');
     } catch (err) {
       console.error(err);
       completeOnboarding();
-      navigate('/dashboard');
+      navigate('/director-profile');
     } finally {
       setLoading(false);
     }

@@ -16,6 +16,7 @@ import GetStarted from './pages/auth/GetStarted';
 import OnboardingStep1 from './pages/onboarding/Step1';
 import OnboardingStep2 from './pages/onboarding/Step2';
 import OnboardingStep3 from './pages/onboarding/Step3';
+import PersonalityQuestions from './pages/onboarding/PersonalityQuestions';
 
 // Dashboard
 import Dashboard from './pages/dashboard/Dashboard';
@@ -60,6 +61,10 @@ function App() {
             <Route path="/onboarding/step1" element={<ProtectedRoute><OnboardingStep1 /></ProtectedRoute>} />
             <Route path="/onboarding/step2" element={<ProtectedRoute><OnboardingStep2 /></ProtectedRoute>} />
             <Route path="/onboarding/step3" element={<ProtectedRoute><OnboardingStep3 /></ProtectedRoute>} />
+            {/* Director Profiling questionnaire. Deliberately NOT under /onboarding/*
+                — ProtectedRoute bounces onboarded users away from onboarding routes,
+                and we send them here right after completing onboarding. */}
+            <Route path="/director-profile" element={<ProtectedRoute><PersonalityQuestions /></ProtectedRoute>} />
 
             {/* Dashboard */}
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
