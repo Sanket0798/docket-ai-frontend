@@ -88,7 +88,7 @@ const ExportSuccess = () => {
             className="flex items-center justify-center gap-2 h-[42px] px-5 border border-brand-color text-brand-color hover:bg-blue-50 text-[15px] font-medium rounded-[6px] transition cursor-pointer"
           >
             <MdFolderOpen size={17} />
-            Back to project
+            Refine selections
           </button>
 
           <button

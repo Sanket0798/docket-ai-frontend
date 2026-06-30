@@ -113,26 +113,42 @@ const Dashboard = () => {
             <img src="/assets/icons/Empty-cuate.svg" alt="No workspaces" className="mb-6" />
             <p className="font-regular text-3xl text-[#1B1B1D] mb-2" style={{ fontFamily: 'Urbanist, sans-serif' }}>No Workspace Yet</p>
             <p className="font-normal text-[19px] text-[#787889] mb-6" style={{ fontFamily: 'Urbanist, sans-serif' }}>Create your videos in new workspace</p>
-            <button
-              onClick={() => setShowModal(true)}
-              className="flex items-center gap-2 h-[38px] px-5 bg-brand-color text-white text-[15px] leading-[18px] font-medium rounded-[6px] hover:opacity-90 transition cursor-pointer"
-            >
-              Create workspace
-              <img src="assets/icons/plus.svg" alt="" />
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <button
+                onClick={() => setShowModal(true)}
+                className="flex items-center gap-2 h-[38px] px-5 bg-brand-color text-white text-[15px] leading-[18px] font-medium rounded-[6px] hover:opacity-90 transition cursor-pointer"
+              >
+                Create workspace
+                <img src="assets/icons/plus.svg" alt="" />
+              </button>
+              <button
+                onClick={() => navigate('/director-profile')}
+                className="flex items-center gap-2 h-[38px] px-5 border border-brand-color text-brand-color text-[15px] leading-[18px] font-medium rounded-[6px] bg-transparent hover:bg-indigo-50 transition cursor-pointer"
+              >
+                Take profiling
+              </button>
+            </div>
           </div>
         ) : (
           <>
             <div className='flex flex-col px-4 lg:px-[60px] my-[18px]'>
               <div className="flex items-center justify-between mb-9">
                 <h1 className="text-[22px] lg:text-[34px] font-medium leading-[48px] text-[#4A4755]">My Workspaces</h1>
-                <button
-                  onClick={() => setShowModal(true)}
-                  className="flex items-center gap-2 h-[38px] px-5 bg-brand-color hover:bg-indigo-700 text-white font-medium text-[15px] leading-[18px] rounded-[6px] transition cursor-pointer"
-                >
-                  Create Workspace
-                  <img src="assets/icons/plus.svg" alt="" />
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => navigate('/director-profile')}
+                    className="flex items-center gap-2 h-[38px] px-5 border border-brand-color text-brand-color font-medium text-[15px] leading-[18px] rounded-[6px] bg-transparent hover:bg-indigo-50 transition cursor-pointer"
+                  >
+                    Take profiling
+                  </button>
+                  <button
+                    onClick={() => setShowModal(true)}
+                    className="flex items-center gap-2 h-[38px] px-5 bg-brand-color hover:bg-indigo-700 text-white font-medium text-[15px] leading-[18px] rounded-[6px] transition cursor-pointer"
+                  >
+                    Create Workspace
+                    <img src="assets/icons/plus.svg" alt="" />
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {workspaces.map((ws) => (

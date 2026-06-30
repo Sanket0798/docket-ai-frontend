@@ -5,57 +5,65 @@ import Footer from '../../components/Footer';
 import api from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 
-// Same gradient used in AIQuestions for placeholder images
+// Gradient fallbacks for the placeholder image preview (real clip media isn't
+// generated yet — the default view surfaces the scene prompt + metadata instead).
 const CARD_GRADIENTS = [
   'from-yellow-200 via-orange-300 to-purple-400',
   'from-orange-200 via-yellow-300 to-green-300',
   'from-purple-200 via-blue-300 to-orange-300',
-  'from-yellow-300 via-orange-200 to-teal-300',
 ];
+
+const fmt = (n) => (typeof n === 'number' ? n.toFixed(3) : '—');
 
 const Preview = () => {
   const navigate = useNavigate();
   const { workspaceId, projectId } = useParams();
   const location = useLocation();
   const workspaceName = location.state?.workspaceName || 'my_workspace';
-  const answersFromState = location.state?.answers || {};
 
-  const [questions, setQuestions] = useState([]);
+  const [data, setData] = useState(null);        // full /scenes response
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [projectName, setProjectName] = useState(location.state?.projectName || '');
 
-  // Track wishlisted cards: { "sectionIndex-cardIndex": true }
+  // 'cards' = scene-prompt cards (default) | 'images' = placeholder image preview
+  const [view, setView] = useState('cards');
+  const [openMeta, setOpenMeta] = useState({});   // `${pi}-${mi}` -> bool
   const [wishlisted, setWishlisted] = useState({});
-  // Track deleted cards: { "sectionIndex-cardIndex": true }
   const [deleted, setDeleted] = useState({});
-  // Wishlist toast
-  const [wishlistMsg, setWishlistMsg] = useState('');
   const { toast } = useToast();
 
-  useEffect(() => {
+  const load = () => {
+    setLoading(true);
+    setError('');
     Promise.all([
-      api.get(`/projects/${projectId}/questions`),
+      // 3 matches per parameter — shown 3-up with vertical scroll through parameters.
+      api.get(`/projects/${projectId}/scenes?top_k=3`),
       projectName ? Promise.resolve(null) : api.get(`/projects/${projectId}`),
     ])
-      .then(([questionsRes, projectRes]) => {
-        setQuestions(questionsRes.data);
+      .then(([scenesRes, projectRes]) => {
+        setData(scenesRes.data);
         if (projectRes) setProjectName(projectRes.data.name || '');
       })
-      .catch(err => {
+      .catch((err) => {
         console.error(err);
-        toast('Failed to load preview data. Please go back and try again.', 'error');
+        setError(
+          err.response?.data?.message ||
+            'Could not generate scene references. Make sure a script was uploaded, then retry.'
+        );
       })
       .finally(() => setLoading(false));
-  }, [projectId]);
+  };
+
+  useEffect(load, [projectId]);
 
   const handleExport = async () => {
     setExporting(true);
     try {
       await api.put(`/projects/${projectId}/status`, { status: 'completed' });
-      navigate(`/workspace/${workspaceId}/project/${projectId}/success`,
-        { state: { workspaceName } });
+      navigate(`/workspace/${workspaceId}/project/${projectId}/success`, { state: { workspaceName } });
     } catch (err) {
       console.error(err);
       toast('Export failed. Please try again.', 'error');
@@ -65,48 +73,113 @@ const Preview = () => {
     }
   };
 
-  const handleWishlist = async (sectionIndex, cardIndex, questionId) => {
-    const key = `${sectionIndex}-${cardIndex}`;
-    if (wishlisted[key]) return; // already wishlisted
-
+  const handleWishlist = async (pi, mi, param, match) => {
+    const key = `${pi}-${mi}`;
+    if (wishlisted[key]) return;
     try {
       await api.post('/wishlist', {
         project_id: projectId,
-        image_url: null, // placeholder — real URL when AI generates images
-        image_index: cardIndex,
-        question_id: questionId || `q_${sectionIndex}`,
-        tags: sections[sectionIndex]?.question?.split(' ').slice(0, 2).join(',') || 'Lighting,Mood',
+        image_url: match.thumbnail_url || null,
+        image_index: mi,
+        question_id: param.name,
+        tags: (match.tags || []).join(','),
       });
-      setWishlisted(prev => ({ ...prev, [key]: true }));
-      setWishlistMsg('Added to wishlist!');
-      setTimeout(() => setWishlistMsg(''), 2000);
+      setWishlisted((p) => ({ ...p, [key]: true }));
+      toast('Added to wishlist!', 'success');
     } catch (err) {
       console.error(err);
       toast('Failed to add to wishlist', 'error');
     }
   };
 
-  const handleDeleteCard = (sectionIndex, cardIndex) => {
-    const key = `${sectionIndex}-${cardIndex}`;
-    setDeleted(prev => ({ ...prev, [key]: true }));
-  };
+  const toggleMeta = (key) => setOpenMeta((p) => ({ ...p, [key]: !p[key] }));
 
-  // Build preview sections — one per question
-  // Each section shows the question + selected image cards
-  const sections = questions.length > 0
-    ? questions.map((q, i) => ({
-      question: q.question,
-      subtitle: 'Lighting influences the visual mood and depth of your scene',
-      gradient: CARD_GRADIENTS[i % CARD_GRADIENTS.length],
-      // answer is comma-separated indices e.g. "0,2,4"
-      selectedCount: q.answer ? q.answer.split(',').length : 4,
-    }))
-    : CARD_GRADIENTS.map((g, i) => ({
-      question: 'What lighting tone fits this scene?',
-      subtitle: 'Lighting influences the visual mood and depth of your scene',
-      gradient: g,
-      selectedCount: 4,
-    }));
+  const parameters = data?.parameters || [];
+  const profileApplied = data?.profile_present;
+
+  // ── Metadata block (the "why this matched / ranked on top") ──────────
+  const MetaPanel = ({ match, rank }) => (
+    <div className="mt-2 text-[12px] leading-[18px] text-[#4A4755] bg-[#F4F6FF] border border-[#D9E1FF] rounded-[6px] p-3 space-y-2">
+      <div>
+        <p className="font-semibold text-[11px] uppercase tracking-wide text-brand-color mb-1">Matched tags</p>
+        <div className="flex flex-wrap gap-1.5">
+          {(match.tags || []).map((t) => (
+            <span key={t} className="px-2 py-0.5 rounded-full bg-white border border-[#D9E1FF] text-[11px] text-[#3B3A45]">{t}</span>
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+        <span>Rank</span><span className="text-right font-medium text-text-h1">#{rank}</span>
+        <span>Final score</span><span className="text-right font-medium text-text-h1">{fmt(match.score)}</span>
+        <span>Script similarity</span><span className="text-right">{fmt(match.cosine_score)}</span>
+        <span>Quadrant match</span>
+        <span className="text-right">{match.quadrant_match ? `✓ ${match.quadrant_affinity}` : '—'}</span>
+        <span>Axis overlap</span><span className="text-right">{fmt(match.axis_overlap)}</span>
+      </div>
+      <p className="pt-1 border-t border-[#D9E1FF] text-[#5D586C]">
+        {match.quadrant_match
+          ? `Ranked #${rank} — boosted because its "${match.quadrant_affinity}" affinity matches your director profile.`
+          : `Ranked #${rank} on script similarity (no profile boost on this clip).`}
+      </p>
+    </div>
+  );
+
+  // ── A single matched-reference card ──────────────────────────────────
+  const MatchCard = ({ param, m, pi, mi }) => {
+    const key = `${pi}-${mi}`;
+    if (deleted[key]) return null;
+    return (
+      <div className="rounded-[8px] border border-input-border bg-white flex flex-col overflow-hidden">
+        {/* Header: rank/score + actions */}
+        <div className="flex items-center justify-between px-3 pt-3">
+          <span className="px-2 py-0.5 rounded-[4px] bg-brand-color text-white text-[11px] font-medium">#{mi + 1} · {fmt(m.score)}</span>
+          <div className="flex gap-1">
+            <button onClick={() => setDeleted((p) => ({ ...p, [key]: true }))} className="w-6 h-5 bg-gray-50 rounded-[6px] flex items-center justify-center hover:bg-red-50 cursor-pointer" title="Remove">
+              <img src="/assets/icons/delete-fill.svg" alt="" />
+            </button>
+            <button onClick={() => handleWishlist(pi, mi, param, m)} className={`w-6 h-5 rounded-[6px] flex items-center justify-center cursor-pointer ${wishlisted[key] ? 'bg-red-100' : 'bg-gray-50 hover:bg-red-50'}`} title="Add to wishlist">
+              <img src="/assets/icons/heart.svg" alt="" className={wishlisted[key] ? 'opacity-100' : 'opacity-70'} />
+            </button>
+          </div>
+        </div>
+
+        {/* Title */}
+        <div className="px-3 pt-2">
+          <p className="text-[15px] font-semibold text-text-h1 leading-tight">{m.title}</p>
+          <p className="text-[11px] text-[#8A8794] mt-0.5">{m.primary_tag} · {m.duration_sec}s</p>
+        </div>
+
+        {/* Media area — scene prompt (default) OR placeholder image */}
+        {view === 'images' ? (
+          <div className="mx-3 mt-2 rounded-[6px] overflow-hidden">
+            <img
+              src="/assets/project/AI-Image.jpg"
+              alt=""
+              className="w-full h-[120px] object-cover"
+              onError={(e) => {
+                e.target.style.display = 'none';
+                e.target.parentElement.classList.add('bg-gradient-to-br', ...CARD_GRADIENTS[mi % 3].split(' '), 'h-[120px]');
+              }}
+            />
+          </div>
+        ) : (
+          <div className="mx-3 mt-2 rounded-[6px] bg-[#F7F8FE] border border-[#E6EAFA] p-3 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-color mb-1">Scene prompt</p>
+            <p className="text-[13px] leading-[160%] text-[#3B3A45]">{m.description}</p>
+          </div>
+        )}
+
+        {/* Why this matched */}
+        <div className="px-3 pb-3 pt-2">
+          <button onClick={() => toggleMeta(key)} className="flex items-center gap-1 text-[12px] text-brand-color font-medium cursor-pointer">
+            Why this matched
+            <span className={`transition-transform ${openMeta[key] ? 'rotate-180' : ''}`}>▾</span>
+          </button>
+          {openMeta[key] && <MetaPanel match={m} rank={mi + 1} />}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -114,144 +187,114 @@ const Preview = () => {
 
       <main className="flex-1 px-4 lg:px-[60px] py-[51px]">
         {/* Breadcrumb */}
-        <div className="flex items-center gap-2 mb-[58px]">
+        <div className="flex items-center gap-2 mb-[40px]">
           <span className="text-text-h1 text-[22px] lg:text-[34px] leading-12 font-medium truncate">{workspaceName} /</span>
-          <span className="font-light text-[18px] lg:text-[30px] leading-10 text-[#A7A7A7] truncate">
-            {projectName || '...'}
-          </span>
+          <span className="font-light text-[18px] lg:text-[30px] leading-10 text-[#A7A7A7] truncate">{projectName || '...'}</span>
         </div>
 
         {/* Heading */}
-        <div className="flex flex-row mb-2 gap-5">
+        <div className="flex flex-row mb-2 gap-5 items-center">
           <button
-            onClick={() => navigate(`/workspace/${workspaceId}/project/${projectId}/questions`,
-              { state: { workspaceName, resumeStep: 3 } })}
-            className=" cursor-pointer"
+            onClick={() => navigate(`/workspace/${workspaceId}/project/${projectId}/questions`, { state: { workspaceName, resumeStep: 3 } })}
+            className="cursor-pointer"
           >
             <img src="/assets/icons/back-arrow.svg" alt="back" />
           </button>
           <h1 className="font-medium text-[22px] lg:text-[34px] leading-[48px] text-text-h1">Preview</h1>
         </div>
-        <p className="font-normal text-lg leading-[130%] text-[#5D586C] mb-9" style={{ fontFamily: 'Geist, sans-serif' }}>All selected generates in one place</p>
+        <p className="font-normal text-lg leading-[130%] text-[#5D586C] mb-5" style={{ fontFamily: 'Geist, sans-serif' }}>
+          Reference clips matched to your script{profileApplied ? ' and re-ranked to your Director Profile' : ''}
+        </p>
 
-        {/* Preview container */}
-        <div className="flex flex-col items-center justify-center border border-input-border rounded-[6px] bg-[#F9F9F9] py-9 mb-[73px]">
+        {/* Profile / method banner */}
+        {data && (
+          <div className="flex flex-wrap items-center gap-2 mb-6 text-[13px]">
+            <span className={`px-3 py-1 rounded-full border ${profileApplied ? 'bg-green-50 border-green-200 text-green-800' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+              {profileApplied ? '✓ Director Profile applied' : 'No profile — ranked by script similarity'}
+            </span>
+            <span className="px-3 py-1 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700">
+              Intent: {data.intent_method || 'n/a'}
+            </span>
+            <span className="px-3 py-1 rounded-full bg-gray-50 border border-gray-200 text-gray-600">
+              {parameters.length} creative parameters
+            </span>
+          </div>
+        )}
 
-          {loading ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="w-8 h-8 border-4 border-brand-color border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : (
-            <div className="space-y-[30px]">
-              {sections.map((section, si) => (
-                <div key={si}>
-                  {/* Question title */}
-                  <h2 className="font-medium text-[22px] leading-8 text-text-h1 mb-2">{section.question}</h2>
-                  <p className="font-normal text-sm leading-[130%] text-[#5D586C] mb-5">{section.subtitle}</p>
-
-                  {/* Selected image grid — 2 cols on mobile, 4 on desktop */}
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                    {Array.from({ length: section.selectedCount }).map((_, i) => {
-                      const key = `${si}-${i}`;
-                      if (deleted[key]) return null;
-                      const isWishlisted = wishlisted[key];
-                      return (
-                        <div
-                          key={i}
-                          className="relative rounded-[4px] overflow-hidden border-[3px] border-brand-color"
-                        >
-                          {/* Placeholder image */}
-                          <img
-                            src="/assets/project/AI-Image.jpg"
-                            alt=""
-                            className="w-[205px] h-[137px] object-cover"
-                            onError={(e) => {
-                              e.target.style.display = 'none';
-                              e.target.parentElement.classList.add(`bg-gradient-to-br`, section.gradient);
-                            }}
-                          />
-                          {/* Icon badges top-right */}
-                          <div className="absolute top-1.5 right-1.5 flex gap-1">
-                            {/* Delete card */}
-                            <button
-                              onClick={() => handleDeleteCard(si, i)}
-                              className="w-6 h-5 bg-white rounded-[6px] flex items-center justify-center hover:bg-red-50 transition cursor-pointer"
-                              title="Remove"
-                            >
-                              <img src="/assets/icons/delete-fill.svg" alt="" />
-                            </button>
-                            {/* Add to wishlist */}
-                            <button
-                              onClick={() => handleWishlist(si, i, questions[si]?.id)}
-                              className={`w-6 h-5 rounded-[6px] flex items-center justify-center transition cursor-pointer
-                                ${isWishlisted ? 'bg-red-100' : 'bg-white hover:bg-red-50'}`}
-                              title={isWishlisted ? 'Wishlisted' : 'Add to wishlist'}
-                            >
-                              <img
-                                src="/assets/icons/heart.svg"
-                                alt=""
-                                className={isWishlisted ? 'opacity-100' : 'opacity-70'}
-                              />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+        {/* View tabs — scene prompts (default) vs placeholder image preview */}
+        <div className="flex items-center gap-1 border-b border-input-border mb-7">
+          {[
+            { id: 'cards', label: 'Scene prompts' },
+            { id: 'images', label: 'Image preview' },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setView(t.id)}
+              className={`px-4 py-3 text-[14px] font-medium border-b-2 transition cursor-pointer ${
+                view === t.id ? 'border-brand-color text-brand-color' : 'border-transparent text-text-h2 hover:text-[#4A4755]'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
 
-        {/* Save and export button — bottom left */}
-        <button
-          onClick={() => setShowConfirm(true)}
-          className="flex items-center justify-center w-[192px] h-[38px] px-6 bg-brand-color hover:bg-blue-700 text-white text-[15px] font-medium rounded-[6px] transition cursor-pointer"
-        >
-          Save and export
-        </button>
-
-        {/* Wishlist toast */}
-        {wishlistMsg && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm font-medium px-5 py-2.5 rounded-[6px] shadow-lg z-50 flex items-center gap-2">
-            <img src="/assets/icons/wishlist-heart.svg" alt="" className="w-4 h-4" />
-            {wishlistMsg}
+        {/* Body */}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center h-64 gap-3">
+            <div className="w-8 h-8 border-4 border-brand-color border-t-transparent rounded-full animate-spin" />
+            <p className="text-sm text-[#5D586C]">Searching the reference bank and re-ranking to your profile…</p>
           </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center h-64 gap-4 border border-input-border rounded-[6px] bg-[#FFF7F7]">
+            <p className="text-sm text-red-700 max-w-md text-center">{error}</p>
+            <button onClick={load} className="px-5 h-[38px] bg-brand-color text-white text-[14px] font-medium rounded-[6px] cursor-pointer">Retry</button>
+          </div>
+        ) : (
+          <div className="space-y-10">
+            {parameters.map((param, pi) => (
+              <section key={param.name}>
+                <h2 className="font-medium text-[20px] leading-8 text-text-h1 capitalize">
+                  {param.question || param.name.replace(/_/g, ' ')}
+                </h2>
+                <p className="font-normal text-sm leading-[150%] text-[#5D586C] mb-4">
+                  <span className="font-medium text-[#3B3A45]">What the AI searched for: </span>
+                  {param.inferred_intent}
+                </p>
+
+                {/* 3 cards across; the page scrolls vertically through parameters */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
+                  {param.matches.map((m, mi) => (
+                    <MatchCard key={m.reference_id} param={param} m={m} pi={pi} mi={mi} />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+
+        {/* Export */}
+        {!loading && !error && (
+          <button
+            onClick={() => setShowConfirm(true)}
+            className="mt-12 flex items-center justify-center w-[192px] h-[38px] px-6 bg-brand-color hover:bg-blue-700 text-white text-[15px] font-medium rounded-[6px] transition cursor-pointer"
+          >
+            Save and export
+          </button>
         )}
       </main>
 
       <Footer />
 
-      {/* Confirmation Modal */}
       {showConfirm && (
-        <div
-          className="fixed inset-0 bg-black/20 flex items-center justify-center z-50"
-          onClick={() => setShowConfirm(false)}
-        >
-          <div
-            className="bg-white border border-[#CAC9CD] rounded-[6px] w-full max-w-[560px] lg:max-w-[1000px] lg:h-[488px] mx-4 px-6 py-10 flex flex-col items-center justify-center text-center"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-50" onClick={() => setShowConfirm(false)}>
+          <div className="bg-white border border-[#CAC9CD] rounded-[6px] w-full max-w-[560px] lg:max-w-[1000px] lg:h-[488px] mx-4 px-6 py-10 flex flex-col items-center justify-center text-center" onClick={(e) => e.stopPropagation()}>
             <h2 className="font-bold text-[26px] lg:text-[34px] leading-[48px] text-text-h1 mb-1">Are you sure ?</h2>
-            <p className="font-normal text-base lg:text-lg leading-[130%] text-[#5D586C] mb-5">
-              Are you sure you want to save and export? No changes can be<br />done once file is exported
-            </p>
+            <p className="font-normal text-base lg:text-lg leading-[130%] text-[#5D586C] mb-5">Are you sure you want to save and export? No changes can be<br />done once file is exported</p>
             <div className="flex items-center justify-center gap-6">
-              <button
-                onClick={() => setShowConfirm(false)}
-                className="h-[38px] w-[192px] px-8 bg-[#E0E8FF] hover:bg-gray-200 text-black text-[15px] font-medium rounded-[6px] transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleExport}
-                disabled={exporting}
-                className="h-[38px] w-[192px] px-8 bg-brand-color text-white text-[15px] font-medium rounded-[6px] transition cursor-pointer"
-              >
-                {exporting && (
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                )}
+              <button onClick={() => setShowConfirm(false)} className="h-[38px] w-[192px] px-8 bg-[#E0E8FF] hover:bg-gray-200 text-black text-[15px] font-medium rounded-[6px] transition cursor-pointer">Cancel</button>
+              <button onClick={handleExport} disabled={exporting} className="h-[38px] w-[192px] px-8 bg-brand-color text-white text-[15px] font-medium rounded-[6px] transition cursor-pointer">
+                {exporting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                 Export
               </button>
             </div>
