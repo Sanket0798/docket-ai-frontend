@@ -39,8 +39,8 @@ const Preview = () => {
     setLoading(true);
     setError('');
     Promise.all([
-      // 3 matches per parameter — shown 3-up with vertical scroll through parameters.
-      api.get(`/projects/${projectId}/scenes?top_k=3`),
+      // 10 matches per parameter — shown 3-up with vertical scroll through parameters.
+      api.get(`/projects/${projectId}/scenes?top_k=10`),
       projectName ? Promise.resolve(null) : api.get(`/projects/${projectId}`),
     ])
       .then(([scenesRes, projectRes]) => {
@@ -146,23 +146,24 @@ const Preview = () => {
         {/* Title */}
         <div className="px-3 pt-2">
           <p className="text-[15px] font-semibold text-text-h1 leading-tight">{m.title}</p>
-          <p className="text-[11px] text-[#8A8794] mt-0.5">{m.primary_tag} · {m.duration_sec}s</p>
+          <p className="text-[11px] text-[#8A8794] mt-0.5">{m.primary_tag}{m.duration_sec ? ` · ${m.duration_sec}s` : ''}</p>
         </div>
 
-        {/* Media area — scene prompt (default) OR placeholder image */}
-        {view === 'images' ? (
-          <div className="mx-3 mt-2 rounded-[6px] overflow-hidden">
-            <img
-              src="/assets/project/AI-Image.jpg"
-              alt=""
-              className="w-full h-[120px] object-cover"
-              onError={(e) => {
-                e.target.style.display = 'none';
-                e.target.parentElement.classList.add('bg-gradient-to-br', ...CARD_GRADIENTS[mi % 3].split(' '), 'h-[120px]');
-              }}
-            />
-          </div>
-        ) : (
+        {/* Media area — the matched reference still (always shown), plus the
+            scene prompt beneath it in the default 'cards' view. */}
+        <div className="mx-3 mt-2 rounded-[6px] overflow-hidden bg-gray-50">
+          <img
+            src={m.thumbnail_url || '/assets/project/AI-Image.jpg'}
+            alt={m.title}
+            loading="lazy"
+            className={`w-full object-cover ${view === 'images' ? 'h-[200px]' : 'h-[130px]'}`}
+            onError={(e) => {
+              e.target.style.display = 'none';
+              e.target.parentElement.classList.add('bg-gradient-to-br', ...CARD_GRADIENTS[mi % 3].split(' '), view === 'images' ? 'h-[200px]' : 'h-[130px]');
+            }}
+          />
+        </div>
+        {view === 'cards' && (
           <div className="mx-3 mt-2 rounded-[6px] bg-[#F7F8FE] border border-[#E6EAFA] p-3 flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-color mb-1">Scene prompt</p>
             <p className="text-[13px] leading-[160%] text-[#3B3A45]">{m.description}</p>
@@ -224,8 +225,8 @@ const Preview = () => {
         {/* View tabs — scene prompts (default) vs placeholder image preview */}
         <div className="flex items-center gap-1 border-b border-input-border mb-7">
           {[
-            { id: 'cards', label: 'Scene prompts' },
-            { id: 'images', label: 'Image preview' },
+            { id: 'cards', label: 'Scenes (image + prompt)' },
+            { id: 'images', label: 'Images' },
           ].map((t) => (
             <button
               key={t.id}
