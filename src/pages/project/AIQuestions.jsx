@@ -4,6 +4,7 @@ import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import api from '../../services/api';
 import { useToast } from '../../context/ToastContext';
+import { MediaBadge, MediaBadgeInline, SwatchStrip } from '../../components/referenceMedia';
 
 const PAGE_SIZE = 10;
 const fmt = (n) => (typeof n === 'number' ? n.toFixed(3) : '—');
@@ -153,6 +154,7 @@ const AIQuestions = () => {
           loading="lazy"
           className="w-full h-[150px] object-cover"
         />
+        <SwatchStrip src={m.thumbnail_url} />
         <div className="px-2 py-1.5">
           <p className="text-[12px] font-medium text-text-h1 truncate">{m.title}</p>
           <p className="text-[10px] text-[#8A8794]">score {fmt(m.score)}{m.below_gate ? ' · weak match' : ''}</p>
@@ -193,6 +195,7 @@ const AIQuestions = () => {
         <div className="px-3 pt-2">
           <p className="text-[15px] font-semibold text-text-h1 leading-tight">{m.title}</p>
           <p className="text-[11px] text-[#8A8794] mt-0.5">{m.primary_tag}</p>
+          <div className="mt-1"><MediaBadgeInline param={meta.name} /></div>
         </div>
         <div className="mx-3 mt-2 rounded-[6px] overflow-hidden bg-gray-50">
           <img
@@ -202,6 +205,7 @@ const AIQuestions = () => {
             className="w-full h-[180px] object-cover"
           />
         </div>
+        <div className="mx-3"><SwatchStrip src={m.thumbnail_url} /></div>
         <div className="mx-3 mt-2 rounded-[6px] bg-[#F7F8FE] border border-[#E6EAFA] p-3 flex-1">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-color mb-1">Scene prompt</p>
           <p className="text-[13px] leading-[160%] text-[#3B3A45]">{m.description}</p>
@@ -331,9 +335,12 @@ const AIQuestions = () => {
 
         {/* Question heading */}
         <div className="mb-6">
-          <h1 className="font-medium text-[22px] lg:text-[34px] leading-[44px] text-text-h1 mb-1 capitalize">
-            {current.question}
-          </h1>
+          <div className="flex items-center gap-3 flex-wrap mb-1">
+            <h1 className="font-medium text-[22px] lg:text-[34px] leading-[44px] text-text-h1 capitalize">
+              {current.question}
+            </h1>
+            <MediaBadge param={meta.name} />
+          </div>
           {meta.intent && (
             <p className="font-normal text-sm lg:text-base leading-[150%] text-[#5D586C]">
               <span className="font-medium text-[#3B3A45]">What the AI searched for: </span>{meta.intent}

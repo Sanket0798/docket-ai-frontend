@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import api from '../../services/api';
+import { MediaBadge, SwatchStrip } from '../../components/referenceMedia';
 
 const fmt = (n) => (typeof n === 'number' ? n.toFixed(3) : '—');
 
@@ -50,6 +51,7 @@ const Preview = () => {
       id: q.id,
       order: q.question_order,
       question: q.question,
+      name: meta.name || '',
       intent: meta.intent || '',
       picks: matches.filter((m) => selected.has(m.reference_id)),
     };
@@ -111,9 +113,12 @@ const Preview = () => {
           <div className="space-y-10">
             {sections.map((s) => (
               <section key={s.id}>
-                <h2 className="font-medium text-[20px] leading-8 text-text-h1 capitalize">
-                  {s.order}. {s.question}
-                </h2>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h2 className="font-medium text-[20px] leading-8 text-text-h1 capitalize">
+                    {s.order}. {s.question}
+                  </h2>
+                  <MediaBadge param={s.name} />
+                </div>
                 {s.intent && (
                   <p className="font-normal text-sm leading-[150%] text-[#5D586C] mb-4">
                     <span className="font-medium text-[#3B3A45]">What the AI searched for: </span>{s.intent}
@@ -144,6 +149,7 @@ const Preview = () => {
                               className="w-full h-[180px] object-cover"
                             />
                           </div>
+                          <div className="mx-3"><SwatchStrip src={m.thumbnail_url} /></div>
                           <div className="px-3 pt-2">
                             <p className="text-[15px] font-semibold text-text-h1 leading-tight">{m.title}</p>
                             <p className="text-[11px] text-[#8A8794] mt-0.5">{m.primary_tag}</p>

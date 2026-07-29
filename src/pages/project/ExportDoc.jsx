@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import api from '../../services/api';
 import { useToast } from '../../context/ToastContext';
+import { MediaBadge, SwatchStrip } from '../../components/referenceMedia';
+import { extractPalette } from '../../utils/referenceMedia';
 
 // Printable export of the director's selections: every question + the chosen
 // reference images + scene prompts.
@@ -33,6 +35,7 @@ const ExportDoc = () => {
           return {
             order: q.question_order,
             question: q.question,
+            name: meta.name || '',
             intent: meta.intent || '',
             picks: (meta.matches || []).filter((m) => selected.has(m.reference_id)),
           };
@@ -69,16 +72,30 @@ const ExportDoc = () => {
         } catch { return null; }
       };
 
+      // #5: extract the dominant palette from the inlined image (data URL) so the
+      // standalone HTML export carries colour swatches too — no API, in-browser.
+      const paletteFor = (dataUrl) => new Promise((resolve) => {
+        if (!dataUrl) return resolve([]);
+        const img = new Image();
+        img.onload = () => resolve(extractPalette(img, 6));
+        img.onerror = () => resolve([]);
+        img.src = dataUrl;
+      });
+
       const secHtml = [];
       for (const s of sections) {
         const cards = [];
         for (const m of s.picks) {
-          const dataUrl = m.thumbnail_url ? await toDataUrl(m.thumbnail_url) : null;
+          const imgUrl = m.clip_url || m.thumbnail_url;
+          const dataUrl = imgUrl ? await toDataUrl(imgUrl) : null;
+          const palette = await paletteFor(dataUrl);
+          const swatches = palette.map((c) => `<span class="sw" style="background:${c}" title="${c}"></span>`).join('');
           cards.push(`
             <div class="card">
               ${dataUrl ? `<img src="${dataUrl}" alt="">` : ''}
               <div class="card-body">
                 <h4>${m.title || ''}</h4>
+                ${swatches ? `<div class="swatches">${swatches}</div>` : ''}
                 <p class="prompt">${m.description || ''}</p>
                 <p class="tags">${(m.tags || []).join(' · ')}</p>
               </div>
@@ -100,9 +117,11 @@ const ExportDoc = () => {
   section{margin-bottom:36px;page-break-inside:avoid}
   h2{font-size:19px;text-transform:capitalize;margin:0 0 4px}
   .intent{font-size:13px;color:#5D586C;margin:0 0 14px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+  .grid{display:grid;grid-template-columns:1fr;gap:20px}
   .card{border:1px solid #e3e3e8;border-radius:8px;overflow:hidden;page-break-inside:avoid}
-  .card img{width:100%;height:190px;object-fit:cover;display:block}
+  .card img{width:100%;max-height:360px;object-fit:contain;display:block;background:#f6f7fb}
+  .swatches{display:flex;gap:4px;margin:8px 0}
+  .sw{width:16px;height:16px;border-radius:50%;border:1px solid rgba(0,0,0,.1)}
   .card-body{padding:12px} h4{margin:0 0 6px;font-size:15px}
   .prompt{font-size:12.5px;line-height:1.55;color:#3B3A45;margin:0 0 8px}
   .tags{font-size:11px;color:#8A8794;margin:0}
@@ -177,18 +196,22 @@ ${secHtml.join('')}
         ) : (
           sections.map((s) => (
             <section key={s.order} className="mb-9" style={{ breakInside: 'avoid' }}>
-              <h2 className="text-[19px] font-medium text-text-h1 capitalize mb-0.5">{s.order}. {s.question}</h2>
+              <div className="flex items-center gap-3 flex-wrap mb-0.5">
+                <h2 className="text-[19px] font-medium text-text-h1 capitalize">{s.order}. {s.question}</h2>
+                <MediaBadge param={s.name} />
+              </div>
               {s.intent && (
                 <p className="text-[13px] text-[#5D586C] mb-3">
                   <span className="font-medium text-[#3B3A45]">What the AI searched for: </span>{s.intent}
                 </p>
               )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-5">
                 {s.picks.map((m) => (
                   <div key={m.reference_id} className="border border-input-border rounded-[8px] overflow-hidden" style={{ breakInside: 'avoid' }}>
-                    <img src={m.thumbnail_url || '/assets/project/AI-Image.jpg'} alt={m.title} className="w-full h-[190px] object-cover" />
+                    <img src={m.clip_url || m.thumbnail_url || '/assets/project/AI-Image.jpg'} alt={m.title} className="w-full h-[320px] object-contain bg-gray-50" />
                     <div className="p-3">
-                      <h4 className="text-[15px] font-semibold text-text-h1 mb-1">{m.title}</h4>
+                      <SwatchStrip src={m.clip_url || m.thumbnail_url} />
+                      <h4 className="text-[15px] font-semibold text-text-h1 mb-1 mt-2">{m.title}</h4>
                       <p className="text-[12.5px] leading-[155%] text-[#3B3A45] mb-2">{m.description}</p>
                       <p className="text-[11px] text-[#8A8794]">{(m.tags || []).join(' · ')}</p>
                     </div>
