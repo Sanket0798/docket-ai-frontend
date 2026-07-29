@@ -1,11 +1,15 @@
-// Meeting improvements #2/#3/#4/#5 — pure helpers (no React) for marking motion/
-// audio reference sections and extracting a dominant colour palette in-browser.
+// Meeting improvements #2/#3/#4/#5/#6 — pure helpers (no React components) for
+// marking motion/audio reference sections, extracting dominant colour palettes
+// in-browser, grouping matches by character, and managing media card interactions.
 //
 // #2/#3/#4: camera_angle, camera_movement, edit_pattern are *motion* sections
 // (today all reference assets are stills); music is an *audio* section (no audio
 // assets exist yet). #5: dominant palette is extracted from the loaded image via
 // a small canvas — reference images are same-origin (/refs/*.jpg) so the canvas is
-// never tainted. No external API, no ingest/schema change.
+// never tainted. No external API, no ingest/schema change. #6: groupByCharacter
+// for casting dividers.
+
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 export const MEDIA_TYPE = {
   camera_angle: { label: 'Motion / video reference', icon: '🎬' },
@@ -48,4 +52,66 @@ export function extractPalette(img, count = 6) {
   } catch {
     return [];
   }
+}
+
+// Meeting improvement #6: group matches by character for casting dividers.
+// Returns [{ character: {label, casting, wardrobe, styling_detail}, matches: [...] }, ...]
+export function groupByCharacter(matches) {
+  const groups = [];
+  const ungrouped = [];
+  for (const m of matches) {
+    const chars = m.characters || [];
+    if (chars.length === 0) {
+      ungrouped.push(m);
+    } else {
+      for (const c of chars) {
+        let g = groups.find(g => g.character.label === c.label);
+        if (!g) {
+          g = { character: c, matches: [] };
+          groups.push(g);
+        }
+        g.matches.push(m);
+      }
+    }
+  }
+  groups.sort((a, b) => b.matches.length - a.matches.length);
+  if (ungrouped.length > 0) groups.push({ character: null, matches: ungrouped });
+  return groups;
+}
+
+// Hook: manages hover-autoplay for audio cards + click-popover for video/audio.
+// Returns: { activePopover, setActivePopover, onCardClick, onCardHover, onCardLeave }
+export function useMediaCardInteraction() {
+  const [activePopover, setActivePopover] = useState(null);
+  const audioRef = useRef(null);
+
+  const onCardClick = useCallback((match) => {
+    if (match?.media_type === 'video' || match?.media_type === 'audio') {
+      setActivePopover(match);
+    }
+  }, []);
+
+  const onCardHover = useCallback((match) => {
+    if (match?.media_type === 'audio' && match?.clip_url) {
+      try {
+        if (!audioRef.current) audioRef.current = new Audio(match.clip_url);
+        else if (audioRef.current.src !== match.clip_url) {
+          audioRef.current.pause();
+          audioRef.current = new Audio(match.clip_url);
+        }
+        audioRef.current.volume = 0.5;
+        audioRef.current.play().catch(() => {});
+      } catch { /* ignore audio errors */ }
+    }
+  }, []);
+
+  const onCardLeave = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+  }, []);
+
+  useEffect(() => () => { if (audioRef.current) audioRef.current.pause(); }, []);
+
+  return { activePopover, setActivePopover, onCardClick, onCardHover, onCardLeave };
 }

@@ -4,7 +4,8 @@ import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import api from '../../services/api';
 import { useToast } from '../../context/ToastContext';
-import { MediaBadge, MediaBadgeInline, SwatchStrip } from '../../components/referenceMedia';
+import { MediaBadge, CardMediaBadge, SwatchStrip, MediaPlayerPopover } from '../../components/referenceMedia';
+import { useMediaCardInteraction, groupByCharacter } from '../../utils/referenceMedia';
 
 const PAGE_SIZE = 10;
 const fmt = (n) => (typeof n === 'number' ? n.toFixed(3) : '—');
@@ -30,6 +31,7 @@ const AIQuestions = () => {
   const [visible, setVisible] = useState({});       // question_order -> count shown
   const [openMeta, setOpenMeta] = useState({});     // matchKey -> bool (detailed card meta)
   const hydratedRef = useRef(false);
+  const { activePopover, setActivePopover, onCardClick, onCardHover, onCardLeave } = useMediaCardInteraction();
 
   useEffect(() => {
     if (projectName) return;
@@ -144,7 +146,12 @@ const AIQuestions = () => {
     const isSelected = selectedIds.has(m.reference_id);
     return (
       <button
-        onClick={() => toggleSelect(m.reference_id)}
+        onClick={() => {
+          if (m.media_type === 'video' || m.media_type === 'audio') onCardClick(m);
+          else toggleSelect(m.reference_id);
+        }}
+        onMouseEnter={() => onCardHover(m)}
+        onMouseLeave={onCardLeave}
         className={`relative rounded-[6px] overflow-hidden border-2 transition-all text-left bg-gray-50
           ${isSelected ? 'border-[#4285F4] border-[4px] rounded-[3px]' : 'border-transparent hover:border-gray-200'}`}
       >
@@ -154,13 +161,14 @@ const AIQuestions = () => {
           loading="lazy"
           className="w-full h-[150px] object-cover"
         />
+        <div className="absolute top-1.5 right-1.5"><CardMediaBadge mediaType={m.media_type} /></div>
         <SwatchStrip src={m.thumbnail_url} />
         <div className="px-2 py-1.5">
           <p className="text-[12px] font-medium text-text-h1 truncate">{m.title}</p>
           <p className="text-[10px] text-[#8A8794]">score {fmt(m.score)}{m.below_gate ? ' · weak match' : ''}</p>
         </div>
         {isSelected && (
-          <div className="absolute top-2 right-2 w-9 h-7 rounded-[8px] bg-white flex items-center justify-center shadow-md">
+          <div className="absolute top-2 left-2 w-9 h-7 rounded-[8px] bg-white flex items-center justify-center shadow-md">
             <img src="/assets/icons/seleted-tick.svg" alt="" />
           </div>
         )}
@@ -177,7 +185,12 @@ const AIQuestions = () => {
     const key = `${currentIndex}-${m.reference_id}`;
     return (
       <div
-        onClick={() => toggleSelect(m.reference_id)}
+        onClick={() => {
+          if (m.media_type === 'video' || m.media_type === 'audio') onCardClick(m);
+          else toggleSelect(m.reference_id);
+        }}
+        onMouseEnter={() => onCardHover(m)}
+        onMouseLeave={onCardLeave}
         className={`relative rounded-[8px] border bg-white flex flex-col overflow-hidden cursor-pointer transition-all
           ${isSelected ? 'border-[#4285F4] ring-2 ring-[#4285F4]' : 'border-input-border hover:border-gray-300'}`}
       >
@@ -188,14 +201,14 @@ const AIQuestions = () => {
         )}
         <div className="flex items-center justify-between px-3 pt-3">
           <span className="px-2 py-0.5 rounded-[4px] bg-brand-color text-white text-[11px] font-medium">#{mi + 1} · {fmt(m.score)}</span>
-          {m.below_gate && (
-            <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-medium mr-10">weak match</span>
-          )}
+          <div className="flex items-center gap-1.5">
+            <CardMediaBadge mediaType={m.media_type} />
+            {m.below_gate && <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-medium">weak match</span>}
+          </div>
         </div>
         <div className="px-3 pt-2">
           <p className="text-[15px] font-semibold text-text-h1 leading-tight">{m.title}</p>
           <p className="text-[11px] text-[#8A8794] mt-0.5">{m.primary_tag}</p>
-          <div className="mt-1"><MediaBadgeInline param={meta.name} /></div>
         </div>
         <div className="mx-3 mt-2 rounded-[6px] overflow-hidden bg-gray-50">
           <img
@@ -348,16 +361,50 @@ const AIQuestions = () => {
           )}
         </div>
 
-        {/* Matches grid */}
-        {cardMode === 'simple' ? (
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            {matches.slice(0, shown).map((m) => <SimpleCard key={m.reference_id} m={m} />)}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
-            {matches.slice(0, shown).map((m, mi) => <DetailedCard key={m.reference_id} m={m} mi={mi} />)}
-          </div>
-        )}
+        {/* Matches grid — with casting character dividers for the casting parameter */}
+        {(() => {
+          const isCasting = meta.name === 'casting';
+          if (!isCasting || cardMode !== 'simple') {
+            return cardMode === 'simple' ? (
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                {matches.slice(0, shown).map((m) => <SimpleCard key={m.reference_id} m={m} />)}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
+                {matches.slice(0, shown).map((m, mi) => <DetailedCard key={m.reference_id} m={m} mi={mi} />)}
+              </div>
+            );
+          }
+          // Casting: group by character with labelled dividers (#6)
+          const groups = groupByCharacter(matches.slice(0, shown));
+          return (
+            <div className="space-y-6">
+              {groups.map((g, gi) => (
+                <div key={gi}>
+                  {g.character ? (
+                    <div className="flex items-center gap-2 mb-3 pb-2 border-b border-input-border">
+                      <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[13px] font-semibold">
+                        {g.character.label.replace(/_/g, ' ')}
+                      </span>
+                      <span className="text-[12px] text-[#8A8794]">{g.character.casting}</span>
+                      {g.character.wardrobe && <span className="text-[12px] text-[#5D586C]">· {g.character.wardrobe}</span>}
+                    </div>
+                  ) : (
+                    <div className="mb-3 pb-2 border-b border-input-border">
+                      <span className="text-[13px] text-[#8A8794] font-medium">Other references</span>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                    {g.matches.map((m) => <SimpleCard key={m.reference_id} m={m} />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* Media player popover */}
+        <MediaPlayerPopover match={activePopover} onClose={() => setActivePopover(null)} />
 
         {/* Load more */}
         <div className="flex items-center gap-4 mt-6">

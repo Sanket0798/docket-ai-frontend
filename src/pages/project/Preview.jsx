@@ -3,7 +3,8 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import api from '../../services/api';
-import { MediaBadge, SwatchStrip } from '../../components/referenceMedia';
+import { MediaBadge, CardMediaBadge, SwatchStrip, MediaPlayerPopover } from '../../components/referenceMedia';
+import { useMediaCardInteraction, groupByCharacter } from '../../utils/referenceMedia';
 
 const fmt = (n) => (typeof n === 'number' ? n.toFixed(3) : '—');
 
@@ -21,6 +22,7 @@ const Preview = () => {
   const [error, setError] = useState('');
   const [projectName, setProjectName] = useState(location.state?.projectName || '');
   const [openMeta, setOpenMeta] = useState({});
+  const { activePopover, setActivePopover, onCardClick, onCardHover, onCardLeave } = useMediaCardInteraction();
 
   const load = () => {
     setLoading(true);
@@ -135,19 +137,73 @@ const Preview = () => {
                       Select now →
                     </button>
                   </div>
+                ) : s.name === 'casting' ? (
+                  // Casting: group by character with labelled dividers (#6)
+                  (() => {
+                    const groups = groupByCharacter(s.picks);
+                    return (
+                      <div className="space-y-6">
+                        {groups.map((g, gi) => (
+                          <div key={gi}>
+                            {g.character ? (
+                              <div className="flex items-center gap-2 mb-3 pb-2 border-b border-input-border">
+                                <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[13px] font-semibold">
+                                  {g.character.label.replace(/_/g, ' ')}
+                                </span>
+                                <span className="text-[12px] text-[#8A8794]">{g.character.casting}</span>
+                              </div>
+                            ) : (
+                              groups.length > 1 && (
+                                <div className="mb-3 pb-2 border-b border-input-border">
+                                  <span className="text-[13px] text-[#8A8794] font-medium">Other references</span>
+                                </div>
+                              )
+                            )}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
+                              {g.matches.map((m) => {
+                                const key = `${s.id}-${m.reference_id}`;
+                                return (
+                                  <div key={key} className="rounded-[8px] border border-input-border bg-white flex flex-col overflow-hidden"
+                                    onClick={() => onCardClick(m)} onMouseEnter={() => onCardHover(m)} onMouseLeave={onCardLeave}
+                                    style={{ cursor: m.media_type === 'video' || m.media_type === 'audio' ? 'pointer' : 'default' }}>
+                                    <div className="mx-3 mt-3 rounded-[6px] overflow-hidden bg-gray-50 relative">
+                                      <img src={m.thumbnail_url || '/assets/project/AI-Image.jpg'} alt={m.title} loading="lazy" className="w-full h-[180px] object-cover" />
+                                      <div className="absolute top-1.5 right-1.5"><CardMediaBadge mediaType={m.media_type} /></div>
+                                    </div>
+                                    <div className="mx-3"><SwatchStrip src={m.thumbnail_url} /></div>
+                                    <div className="px-3 pt-2">
+                                      <p className="text-[15px] font-semibold text-text-h1 leading-tight">{m.title}</p>
+                                      <p className="text-[11px] text-[#8A8794] mt-0.5">{m.primary_tag}</p>
+                                    </div>
+                                    <div className="mx-3 mt-2 rounded-[6px] bg-[#F7F8FE] border border-[#E6EAFA] p-3 flex-1">
+                                      <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-color mb-1">Scene prompt</p>
+                                      <p className="text-[13px] leading-[160%] text-[#3B3A45]">{m.description}</p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
                     {s.picks.map((m) => {
                       const key = `${s.id}-${m.reference_id}`;
                       return (
-                        <div key={key} className="rounded-[8px] border border-input-border bg-white flex flex-col overflow-hidden">
-                          <div className="mx-3 mt-3 rounded-[6px] overflow-hidden bg-gray-50">
+                        <div key={key} className="rounded-[8px] border border-input-border bg-white flex flex-col overflow-hidden"
+                          onClick={() => onCardClick(m)} onMouseEnter={() => onCardHover(m)} onMouseLeave={onCardLeave}
+                          style={{ cursor: m.media_type === 'video' || m.media_type === 'audio' ? 'pointer' : 'default' }}>
+                          <div className="mx-3 mt-3 rounded-[6px] overflow-hidden bg-gray-50 relative">
                             <img
                               src={m.thumbnail_url || '/assets/project/AI-Image.jpg'}
                               alt={m.title}
                               loading="lazy"
                               className="w-full h-[180px] object-cover"
                             />
+                            <div className="absolute top-1.5 right-1.5"><CardMediaBadge mediaType={m.media_type} /></div>
                           </div>
                           <div className="mx-3"><SwatchStrip src={m.thumbnail_url} /></div>
                           <div className="px-3 pt-2">
@@ -160,7 +216,7 @@ const Preview = () => {
                           </div>
                           <div className="px-3 pb-3 pt-2">
                             <button
-                              onClick={() => setOpenMeta((p) => ({ ...p, [key]: !p[key] }))}
+                              onClick={(e) => { e.stopPropagation(); setOpenMeta((p) => ({ ...p, [key]: !p[key] })); }}
                               className="flex items-center gap-1 text-[12px] text-brand-color font-medium cursor-pointer"
                             >
                               Why this matched
@@ -191,6 +247,7 @@ const Preview = () => {
       </main>
 
       <Footer />
+      <MediaPlayerPopover match={activePopover} onClose={() => setActivePopover(null)} />
     </div>
   );
 };

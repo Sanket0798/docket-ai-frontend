@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import api from '../../services/api';
 import { useToast } from '../../context/ToastContext';
-import { MediaBadge, SwatchStrip } from '../../components/referenceMedia';
+import { MediaBadge, CardMediaBadge, SwatchStrip } from '../../components/referenceMedia';
 import { extractPalette } from '../../utils/referenceMedia';
 
 // Printable export of the director's selections: every question + the chosen
@@ -207,7 +207,8 @@ ${secHtml.join('')}
               )}
               <div className="grid grid-cols-1 gap-5">
                 {s.picks.map((m) => (
-                  <div key={m.reference_id} className="border border-input-border rounded-[8px] overflow-hidden" style={{ breakInside: 'avoid' }}>
+                  <div key={m.reference_id} className="border border-input-border rounded-[8px] overflow-hidden relative" style={{ breakInside: 'avoid' }}>
+                    <div className="absolute top-2 right-2 z-10"><CardMediaBadge mediaType={m.media_type} /></div>
                     <img src={m.clip_url || m.thumbnail_url || '/assets/project/AI-Image.jpg'} alt={m.title} className="w-full h-[320px] object-contain bg-gray-50" />
                     <div className="p-3">
                       <SwatchStrip src={m.clip_url || m.thumbnail_url} />
