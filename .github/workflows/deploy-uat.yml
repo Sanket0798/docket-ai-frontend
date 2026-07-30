@@ -1,0 +1,18 @@
+name: Deploy to UAT VM
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to UAT VM
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.UAT_VM_IP }}
+          username: docket
+          key: ${{ secrets.UAT_SSH_KEY }}
+          script: ~/DocketAI/deploy.sh
