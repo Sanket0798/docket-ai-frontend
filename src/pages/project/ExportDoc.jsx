@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import api from '../../services/api';
 import { useToast } from '../../context/ToastContext';
-import { MediaBadge, CardMediaBadge, SwatchStrip } from '../../components/referenceMedia';
-import { extractPalette, groupByCharacter, mediaTypeFor } from '../../utils/referenceMedia';
+import { MediaBadge, CardMediaBadge, SwatchStrip, ReferenceImage } from '../../components/referenceMedia';
+import { extractPalette, groupByCharacter, mediaTypeFor, referenceImageCandidates, REFERENCE_PLACEHOLDER } from '../../utils/referenceMedia';
 
 // Escape every piece of user/data-derived text before it goes into the
 // standalone HTML string — a stray `<` or `&` in a title, prompt or tag would
@@ -35,9 +35,9 @@ const cardBadgeHtml = (mediaType) => {
 const PickCard = ({ m }) => (
   <div className="border border-input-border rounded-[8px] overflow-hidden relative" style={{ breakInside: 'avoid' }}>
     <div className="absolute top-2 right-2 z-10"><CardMediaBadge mediaType={m.media_type} /></div>
-    <img src={m.clip_url || m.thumbnail_url || '/assets/project/AI-Image.jpg'} alt={m.title} className="w-full h-[320px] object-contain bg-gray-50" />
+    <ReferenceImage match={m} preferClip alt={m.title} className="w-full h-[320px] object-contain bg-gray-50" />
     <div className="p-3">
-      <SwatchStrip src={m.clip_url || m.thumbnail_url} />
+      <SwatchStrip match={m} preferClip />
       <h4 className="text-[15px] font-semibold text-text-h1 mb-1 mt-2">{m.title}</h4>
       <p className="text-[12.5px] leading-[155%] text-[#3B3A45] mb-2">{m.description}</p>
       <p className="text-[11px] text-[#8A8794]">{(m.tags || []).join(' · ')}</p>
@@ -103,6 +103,7 @@ const ExportDoc = () => {
       const toDataUrl = async (url) => {
         try {
           const resp = await fetch(url);
+          if (!resp.ok) return null;          // a 404 body would inline as a broken image
           const blob = await resp.blob();
           return await new Promise((resolve) => {
             const r = new FileReader();
@@ -110,6 +111,22 @@ const ExportDoc = () => {
             r.readAsDataURL(blob);
           });
         } catch { return null; }
+      };
+
+      // Same candidate chain the on-screen card walks (remote blob URL → the
+      // local /refs/{reference_id}.jpg), so an image that is unreachable
+      // cross-origin — a CORS-less bucket rejects the fetch outright — is still
+      // inlined from the local bank instead of being dropped from the export.
+      // The placeholder is not inlined: no image beats a fake one, and a null
+      // still degrades gracefully to a card with no <img>.
+      const inlineImage = async (m) => {
+        const chain = referenceImageCandidates(m, { preferClip: true })
+          .filter((c) => c !== REFERENCE_PLACEHOLDER);
+        for (const url of chain) {
+          const dataUrl = await toDataUrl(url);
+          if (dataUrl) return dataUrl;
+        }
+        return null;
       };
 
       // #5: extract the dominant palette from the inlined image (data URL) so the
@@ -123,8 +140,7 @@ const ExportDoc = () => {
       });
 
       const cardHtml = async (m) => {
-        const imgUrl = m.clip_url || m.thumbnail_url;
-        const dataUrl = imgUrl ? await toDataUrl(imgUrl) : null;
+        const dataUrl = await inlineImage(m);
         const palette = await paletteFor(dataUrl);
         const swatches = palette.map((c) => `<span class="sw" style="background:${c}" title="${c}"></span>`).join('');
         return `

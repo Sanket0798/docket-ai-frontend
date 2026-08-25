@@ -3,7 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import api from '../../services/api';
-import { MediaBadge, CardMediaBadge, SwatchStrip, MediaPlayerPopover } from '../../components/referenceMedia';
+import { MediaBadge, CardMediaBadge, SwatchStrip, MediaPlayerPopover, ReferenceImage } from '../../components/referenceMedia';
 import { useMediaCardInteraction, groupByCharacter } from '../../utils/referenceMedia';
 
 const fmt = (n) => (typeof n === 'number' ? n.toFixed(3) : '—');
@@ -167,10 +167,10 @@ const Preview = () => {
                                     onClick={() => onCardClick(m)} onMouseEnter={() => onCardHover(m)} onMouseLeave={onCardLeave}
                                     style={{ cursor: m.media_type === 'video' || m.media_type === 'audio' ? 'pointer' : 'default' }}>
                                     <div className="mx-3 mt-3 rounded-[6px] overflow-hidden bg-gray-50 relative">
-                                      <img src={m.thumbnail_url || '/assets/project/AI-Image.jpg'} alt={m.title} loading="lazy" className="w-full h-[180px] object-cover" />
+                                      <ReferenceImage match={m} alt={m.title} loading="lazy" className="w-full h-[180px] object-cover" />
                                       <div className="absolute top-1.5 right-1.5"><CardMediaBadge mediaType={m.media_type} /></div>
                                     </div>
-                                    <div className="mx-3"><SwatchStrip src={m.thumbnail_url} /></div>
+                                    <div className="mx-3"><SwatchStrip match={m} /></div>
                                     <div className="px-3 pt-2">
                                       <p className="text-[15px] font-semibold text-text-h1 leading-tight">{m.title}</p>
                                       <p className="text-[11px] text-[#8A8794] mt-0.5">{m.primary_tag}</p>
@@ -197,15 +197,15 @@ const Preview = () => {
                           onClick={() => onCardClick(m)} onMouseEnter={() => onCardHover(m)} onMouseLeave={onCardLeave}
                           style={{ cursor: m.media_type === 'video' || m.media_type === 'audio' ? 'pointer' : 'default' }}>
                           <div className="mx-3 mt-3 rounded-[6px] overflow-hidden bg-gray-50 relative">
-                            <img
-                              src={m.thumbnail_url || '/assets/project/AI-Image.jpg'}
+                            <ReferenceImage
+                              match={m}
                               alt={m.title}
                               loading="lazy"
                               className="w-full h-[180px] object-cover"
                             />
                             <div className="absolute top-1.5 right-1.5"><CardMediaBadge mediaType={m.media_type} /></div>
                           </div>
-                          <div className="mx-3"><SwatchStrip src={m.thumbnail_url} /></div>
+                          <div className="mx-3"><SwatchStrip match={m} /></div>
                           <div className="px-3 pt-2">
                             <p className="text-[15px] font-semibold text-text-h1 leading-tight">{m.title}</p>
                             <p className="text-[11px] text-[#8A8794] mt-0.5">{m.primary_tag}</p>

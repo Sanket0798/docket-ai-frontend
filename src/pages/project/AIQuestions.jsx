@@ -4,7 +4,7 @@ import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import api from '../../services/api';
 import { useToast } from '../../context/ToastContext';
-import { MediaBadge, CardMediaBadge, SwatchStrip, MediaPlayerPopover } from '../../components/referenceMedia';
+import { MediaBadge, CardMediaBadge, SwatchStrip, MediaPlayerPopover, ReferenceImage } from '../../components/referenceMedia';
 import { useMediaCardInteraction, groupByCharacter } from '../../utils/referenceMedia';
 
 const PAGE_SIZE = 10;
@@ -155,14 +155,14 @@ const AIQuestions = () => {
         className={`relative rounded-[6px] overflow-hidden border-2 transition-all text-left bg-gray-50
           ${isSelected ? 'border-[#4285F4] border-[4px] rounded-[3px]' : 'border-transparent hover:border-gray-200'}`}
       >
-        <img
-          src={m.thumbnail_url || '/assets/project/AI-Image.jpg'}
+        <ReferenceImage
+          match={m}
           alt={m.title}
           loading="lazy"
           className="w-full h-[150px] object-cover"
         />
         <div className="absolute top-1.5 right-1.5"><CardMediaBadge mediaType={m.media_type} /></div>
-        <SwatchStrip src={m.thumbnail_url} />
+        <SwatchStrip match={m} />
         <div className="px-2 py-1.5">
           <p className="text-[12px] font-medium text-text-h1 truncate">{m.title}</p>
           <p className="text-[10px] text-[#8A8794]">score {fmt(m.score)}{m.below_gate ? ' · weak match' : ''}</p>
@@ -211,14 +211,14 @@ const AIQuestions = () => {
           <p className="text-[11px] text-[#8A8794] mt-0.5">{m.primary_tag}</p>
         </div>
         <div className="mx-3 mt-2 rounded-[6px] overflow-hidden bg-gray-50">
-          <img
-            src={m.thumbnail_url || '/assets/project/AI-Image.jpg'}
+          <ReferenceImage
+            match={m}
             alt={m.title}
             loading="lazy"
             className="w-full h-[180px] object-cover"
           />
         </div>
-        <div className="mx-3"><SwatchStrip src={m.thumbnail_url} /></div>
+        <div className="mx-3"><SwatchStrip match={m} /></div>
         <div className="mx-3 mt-2 rounded-[6px] bg-[#F7F8FE] border border-[#E6EAFA] p-3 flex-1">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-color mb-1">Scene prompt</p>
           <p className="text-[13px] leading-[160%] text-[#3B3A45]">{m.description}</p>

@@ -5,11 +5,91 @@
 // #2/#3/#4: camera_angle, camera_movement, edit_pattern are *motion* sections
 // (today all reference assets are stills); music is an *audio* section (no audio
 // assets exist yet). #5: dominant palette is extracted from the loaded image via
-// a small canvas — reference images are same-origin (/refs/*.jpg) so the canvas is
-// never tainted. No external API, no ingest/schema change. #6: groupByCharacter
-// for casting dividers.
+// a small canvas — a same-origin image (/refs/*.jpg) never taints the canvas, a
+// remote one only stays readable when it is loaded with crossOrigin="anonymous"
+// AND the bucket sends CORS headers (see SwatchStrip). No external API, no
+// ingest/schema change. #6: groupByCharacter for casting dividers.
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+
+// ── Reference media source resolution ────────────────────────────────────
+// The reference bank is local today (159 stills in public/refs) and blob
+// storage (S3 / MinIO / Azure / CDN) in production, so thumbnail_url / clip_url
+// arrive either as a relative path ("/refs/ref_061.jpg") or as an absolute
+// "https://…" URL. Nothing is configured: every item is classified from its own
+// value at render time and falls back down a candidate chain if it fails.
+
+export const REFERENCE_PLACEHOLDER = '/assets/project/AI-Image.jpg';
+
+const NON_IMAGE_EXT = /\.(mp4|m4v|mov|webm|avi|mkv|mp3|wav|m4a|aac|ogg|oga|flac)(\?|#|$)/i;
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?|#|$)/i;
+
+// True for absolute http(s) URLs and protocol-relative "//host/…" ones.
+// False for relative paths, data:/blob:, empty, null and non-strings.
+export function isRemoteUrl(value) {
+  return typeof value === 'string' && /^\s*(https?:)?\/\//i.test(value);
+}
+
+// Can this asset be painted into an <img>? A .mp4 clip_url on a video match
+// cannot, a still (or an untyped/unsuffixed URL on an image match) can.
+function isStillAsset(url, mediaType) {
+  if (typeof url !== 'string' || !url.trim()) return false;
+  if (IMAGE_EXT.test(url)) return true;
+  if (NON_IMAGE_EXT.test(url)) return false;
+  return !mediaType || mediaType === 'image';
+}
+
+// Ordered list of sources to try for a match's still image:
+//   thumbnail_url (or an image clip_url when there is no thumbnail)
+//   → the conventional local file /refs/{reference_id}.jpg
+//   → the shared placeholder.
+// Empties and duplicates are dropped so no source is ever attempted twice.
+// `preferClip` puts an image clip_url first — the export/print card wants the
+// full-res asset rather than the thumbnail.
+export function referenceImageCandidates(match, { preferClip = false } = {}) {
+  const m = match || {};
+  const out = [];
+  const add = (value) => {
+    if (typeof value !== 'string') return;
+    const v = value.trim();
+    if (v && !out.includes(v)) out.push(v);
+  };
+
+  const clip = isStillAsset(m.clip_url, m.media_type) ? m.clip_url : null;
+  if (preferClip) add(clip);
+  add(m.thumbnail_url);
+  if (!preferClip && !m.thumbnail_url) add(clip);
+  if (m.reference_id) add(`/refs/${m.reference_id}.jpg`);
+  add(REFERENCE_PLACEHOLDER);
+  return out;
+}
+
+// Hook: walks a candidate list with the <img> onError event — every failure
+// advances to the next source, and the list is the bound. The attempt index is
+// keyed on the joined candidate list, so a different match starts over at 0
+// while a re-render of the same match keeps its progress. The index only ever
+// increases and the candidates are de-duplicated, so a src is never re-assigned
+// and the walk always terminates on the last candidate (the placeholder).
+export function useFallbackSrc(candidates) {
+  const chain = Array.isArray(candidates) ? candidates : [];
+  const chainKey = chain.join('|');
+  const last = Math.max(chain.length - 1, 0);
+  const [attempt, setAttempt] = useState({ key: chainKey, index: 0 });
+
+  const index = attempt.key === chainKey ? Math.min(attempt.index, last) : 0;
+
+  const onError = useCallback(() => {
+    setAttempt((prev) => {
+      const current = prev.key === chainKey ? prev.index : 0;
+      // Exhausted: stay put and change nothing, so React re-renders nothing and
+      // the failing src is never re-assigned (this is what bounds the loop).
+      if (current >= last) return prev.key === chainKey ? prev : { key: chainKey, index: last };
+      return { key: chainKey, index: current + 1 };
+    });
+  }, [chainKey, last]);
+
+  return { src: chain[index] || '', onError, exhausted: index >= last };
+}
 
 export const MEDIA_TYPE = {
   camera_angle: { label: 'Motion / video reference', icon: '🎬' },

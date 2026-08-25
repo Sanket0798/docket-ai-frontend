@@ -5,7 +5,14 @@
 // Pure helpers (mediaTypeFor, extractPalette, groupByCharacter,
 // useMediaCardInteraction) live in src/utils/referenceMedia.js — kept separate
 // so this file stays component-only for React Fast Refresh.
-import { mediaTypeFor, extractPalette } from '../utils/referenceMedia';
+import {
+  mediaTypeFor,
+  extractPalette,
+  isRemoteUrl,
+  referenceImageCandidates,
+  useFallbackSrc,
+  REFERENCE_PLACEHOLDER,
+} from '../utils/referenceMedia';
 import { useState, useEffect, useRef } from 'react';
 
 // Section-level badge shown next to a question/section heading.
@@ -34,23 +41,53 @@ export function CardMediaBadge({ mediaType }) {
   );
 }
 
-// Renders a row of dominant-colour swatches extracted from `src`.
-export function SwatchStrip({ src, max = 6 }) {
+// The reference still for a match: renders `thumbnail_url` / `clip_url`
+// whether it is a relative path (local bank) or an absolute blob-storage URL,
+// and silently walks down to /refs/{reference_id}.jpg and then the placeholder
+// as sources fail. Nothing is configured — see referenceImageCandidates().
+// Every other prop (className, loading, sizing, alt) is passed straight through.
+export function ReferenceImage({ match, preferClip = false, alt = '', ...rest }) {
+  const { src, onError } = useFallbackSrc(referenceImageCandidates(match, { preferClip }));
+  return <img src={src} alt={alt} onError={onError} {...rest} />;
+}
+
+// Renders a row of dominant-colour swatches extracted from the reference still.
+// Pass `match` to follow the same remote → local → (no placeholder) chain as
+// <ReferenceImage>; `src` stays supported for a one-off URL.
+export function SwatchStrip({ src, match, preferClip = false, max = 6 }) {
   const [colors, setColors] = useState([]);
   const imgRef = useRef(null);
+  // The placeholder is dropped: its palette would be a fake, so an unreachable
+  // reference degrades to no swatches rather than misleading colours.
+  const candidates = match
+    ? referenceImageCandidates(match, { preferClip }).filter((c) => c !== REFERENCE_PLACEHOLDER)
+    : (src ? [src] : []);
+  const { src: resolved, onError } = useFallbackSrc(candidates);
 
   useEffect(() => {
     const img = imgRef.current;
-    if (!img || !src) return;
+    if (!img || !resolved) return;
     const run = () => setColors(extractPalette(img, max));
     if (img.complete && img.naturalWidth) run();
     else img.addEventListener('load', run, { once: true });
-  }, [src, max]);
+  }, [resolved, max]);
 
-  if (!src) return null;
+  if (!resolved) return null;
   return (
     <div className="flex items-center gap-1 mt-1.5" aria-label="Dominant colour palette">
-      <img ref={imgRef} src={src} alt="" aria-hidden className="w-px h-px absolute -z-10 opacity-0" />
+      {/* crossOrigin only for remote sources: it is what keeps the canvas
+          readable for a CORS-enabled bucket, but asking for it on a same-origin
+          file is pointless and can break an otherwise-fine load. A bucket with
+          no CORS headers simply fails extraction and yields no swatches. */}
+      <img
+        ref={imgRef}
+        src={resolved}
+        {...(isRemoteUrl(resolved) ? { crossOrigin: 'anonymous' } : {})}
+        onError={onError}
+        alt=""
+        aria-hidden
+        className="w-px h-px absolute -z-10 opacity-0"
+      />
       {colors.map((c, i) => (
         <span key={i} title={c} className="w-4 h-4 rounded-full border border-black/10" style={{ backgroundColor: c }} />
       ))}
