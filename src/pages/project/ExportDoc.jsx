@@ -3,7 +3,47 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import api from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { MediaBadge, CardMediaBadge, SwatchStrip } from '../../components/referenceMedia';
-import { extractPalette } from '../../utils/referenceMedia';
+import { extractPalette, groupByCharacter, mediaTypeFor } from '../../utils/referenceMedia';
+
+// Escape every piece of user/data-derived text before it goes into the
+// standalone HTML string — a stray `<` or `&` in a title, prompt or tag would
+// otherwise corrupt the exported file. Never applied to values we build
+// ourselves (hex colours, data: URIs).
+const esc = (v) => String(v ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+// Static equivalents of <MediaBadge> / <CardMediaBadge> for the HTML export.
+const sectionBadgeHtml = (param) => {
+  const m = mediaTypeFor(param);
+  if (!m) return '';
+  return `<span class="media-badge"><span aria-hidden="true">${m.icon}</span>${esc(m.label)}</span>`;
+};
+
+const cardBadgeHtml = (mediaType) => {
+  const isVideo = mediaType === 'video';
+  const isAudio = mediaType === 'audio';
+  if (!isVideo && !isAudio) return '';
+  return `<span class="card-badge"><span aria-hidden="true">${isVideo ? '🎬' : '🎧'}</span>${isVideo ? 'Video' : 'Audio'}</span>`;
+};
+
+// One selected reference in the on-screen/print document — single column,
+// full-res clip, object-contain.
+const PickCard = ({ m }) => (
+  <div className="border border-input-border rounded-[8px] overflow-hidden relative" style={{ breakInside: 'avoid' }}>
+    <div className="absolute top-2 right-2 z-10"><CardMediaBadge mediaType={m.media_type} /></div>
+    <img src={m.clip_url || m.thumbnail_url || '/assets/project/AI-Image.jpg'} alt={m.title} className="w-full h-[320px] object-contain bg-gray-50" />
+    <div className="p-3">
+      <SwatchStrip src={m.clip_url || m.thumbnail_url} />
+      <h4 className="text-[15px] font-semibold text-text-h1 mb-1 mt-2">{m.title}</h4>
+      <p className="text-[12.5px] leading-[155%] text-[#3B3A45] mb-2">{m.description}</p>
+      <p className="text-[11px] text-[#8A8794]">{(m.tags || []).join(' · ')}</p>
+    </div>
+  </div>
+);
 
 // Printable export of the director's selections: every question + the chosen
 // reference images + scene prompts.
@@ -82,52 +122,82 @@ const ExportDoc = () => {
         img.src = dataUrl;
       });
 
-      const secHtml = [];
-      for (const s of sections) {
-        const cards = [];
-        for (const m of s.picks) {
-          const imgUrl = m.clip_url || m.thumbnail_url;
-          const dataUrl = imgUrl ? await toDataUrl(imgUrl) : null;
-          const palette = await paletteFor(dataUrl);
-          const swatches = palette.map((c) => `<span class="sw" style="background:${c}" title="${c}"></span>`).join('');
-          cards.push(`
+      const cardHtml = async (m) => {
+        const imgUrl = m.clip_url || m.thumbnail_url;
+        const dataUrl = imgUrl ? await toDataUrl(imgUrl) : null;
+        const palette = await paletteFor(dataUrl);
+        const swatches = palette.map((c) => `<span class="sw" style="background:${c}" title="${c}"></span>`).join('');
+        return `
             <div class="card">
+              ${cardBadgeHtml(m.media_type)}
               ${dataUrl ? `<img src="${dataUrl}" alt="">` : ''}
               <div class="card-body">
-                <h4>${m.title || ''}</h4>
+                <h4>${esc(m.title || '')}</h4>
                 ${swatches ? `<div class="swatches">${swatches}</div>` : ''}
-                <p class="prompt">${m.description || ''}</p>
-                <p class="tags">${(m.tags || []).join(' · ')}</p>
+                <p class="prompt">${esc(m.description || '')}</p>
+                <p class="tags">${esc((m.tags || []).join(' · '))}</p>
               </div>
-            </div>`);
+            </div>`;
+      };
+
+      const cardsHtml = async (matches) => {
+        const cards = [];
+        for (const m of matches) cards.push(await cardHtml(m));
+        return cards.join('');
+      };
+
+      const secHtml = [];
+      for (const s of sections) {
+        let body;
+        if (s.name === 'casting') {
+          // #6: casting is grouped by character with labelled dividers, same as Preview.
+          const groups = groupByCharacter(s.picks);
+          const blocks = [];
+          for (const g of groups) {
+            const divider = g.character
+              ? `<div class="divider"><span class="chip">${esc(g.character.label.replace(/_/g, ' '))}</span><span class="cast">${esc(g.character.casting || '')}</span></div>`
+              : (groups.length > 1 ? '<div class="divider"><span class="other">Other references</span></div>' : '');
+            blocks.push(`<div class="group">${divider}<div class="grid">${await cardsHtml(g.matches)}</div></div>`);
+          }
+          body = `<div class="groups">${blocks.join('')}</div>`;
+        } else {
+          body = `<div class="grid">${await cardsHtml(s.picks)}</div>`;
         }
         secHtml.push(`
           <section>
-            <h2>${s.order}. ${s.question}</h2>
-            ${s.intent ? `<p class="intent"><b>What the AI searched for:</b> ${s.intent}</p>` : ''}
-            <div class="grid">${cards.join('')}</div>
+            <div class="sec-head"><h2>${esc(s.order)}. ${esc(s.question)}</h2>${sectionBadgeHtml(s.name)}</div>
+            ${s.intent ? `<p class="intent"><b>What the AI searched for:</b> ${esc(s.intent)}</p>` : ''}
+            ${body}
           </section>`);
       }
 
       const html = `<!doctype html>
-<html><head><meta charset="utf-8"><title>${projectName || 'DocketAI'} — Reference Selections</title>
+<html><head><meta charset="utf-8"><title>${esc(projectName || 'DocketAI')} — Reference Selections</title>
 <style>
   body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:40px auto;max-width:1080px;color:#1c1b22;padding:0 20px}
   h1{font-size:28px;margin-bottom:4px} .sub{color:#5D586C;margin:0 0 32px;font-size:14px}
   section{margin-bottom:36px;page-break-inside:avoid}
-  h2{font-size:19px;text-transform:capitalize;margin:0 0 4px}
+  .sec-head{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:0 0 4px}
+  h2{font-size:19px;text-transform:capitalize;margin:0}
+  .media-badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;background:#EEF1FF;border:1px solid #D9E1FF;color:#3B5BFF;font-size:11px;font-weight:600}
   .intent{font-size:13px;color:#5D586C;margin:0 0 14px}
+  .groups{display:flex;flex-direction:column;gap:24px}
+  .group{page-break-inside:avoid}
+  .divider{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #e3e3e8}
+  .chip{padding:4px 12px;border-radius:999px;background:#EEF2FF;color:#4338CA;font-size:13px;font-weight:600}
+  .cast{font-size:12px;color:#8A8794} .other{font-size:13px;color:#8A8794;font-weight:500}
   .grid{display:grid;grid-template-columns:1fr;gap:20px}
-  .card{border:1px solid #e3e3e8;border-radius:8px;overflow:hidden;page-break-inside:avoid}
+  .card{position:relative;border:1px solid #e3e3e8;border-radius:8px;overflow:hidden;page-break-inside:avoid}
   .card img{width:100%;max-height:360px;object-fit:contain;display:block;background:#f6f7fb}
+  .card-badge{position:absolute;top:8px;right:8px;z-index:1;display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:999px;background:#EEF1FF;border:1px solid #D9E1FF;color:#3B5BFF;font-size:10px;font-weight:600}
   .swatches{display:flex;gap:4px;margin:8px 0}
   .sw{width:16px;height:16px;border-radius:50%;border:1px solid rgba(0,0,0,.1)}
   .card-body{padding:12px} h4{margin:0 0 6px;font-size:15px}
   .prompt{font-size:12.5px;line-height:1.55;color:#3B3A45;margin:0 0 8px}
   .tags{font-size:11px;color:#8A8794;margin:0}
 </style></head><body>
-<h1>${projectName || 'Project'} — Reference Selections</h1>
-<p class="sub">${workspaceName} · exported ${new Date().toLocaleDateString()} · ${sections.reduce((n, s) => n + s.picks.length, 0)} selected references across ${sections.length} questions</p>
+<h1>${esc(projectName || 'Project')} — Reference Selections</h1>
+<p class="sub">${esc(workspaceName)} · exported ${new Date().toLocaleDateString()} · ${sections.reduce((n, s) => n + s.picks.length, 0)} selected references across ${sections.length} questions</p>
 ${secHtml.join('')}
 </body></html>`;
 
@@ -205,20 +275,41 @@ ${secHtml.join('')}
                   <span className="font-medium text-[#3B3A45]">What the AI searched for: </span>{s.intent}
                 </p>
               )}
-              <div className="grid grid-cols-1 gap-5">
-                {s.picks.map((m) => (
-                  <div key={m.reference_id} className="border border-input-border rounded-[8px] overflow-hidden relative" style={{ breakInside: 'avoid' }}>
-                    <div className="absolute top-2 right-2 z-10"><CardMediaBadge mediaType={m.media_type} /></div>
-                    <img src={m.clip_url || m.thumbnail_url || '/assets/project/AI-Image.jpg'} alt={m.title} className="w-full h-[320px] object-contain bg-gray-50" />
-                    <div className="p-3">
-                      <SwatchStrip src={m.clip_url || m.thumbnail_url} />
-                      <h4 className="text-[15px] font-semibold text-text-h1 mb-1 mt-2">{m.title}</h4>
-                      <p className="text-[12.5px] leading-[155%] text-[#3B3A45] mb-2">{m.description}</p>
-                      <p className="text-[11px] text-[#8A8794]">{(m.tags || []).join(' · ')}</p>
+              {s.name === 'casting' ? (
+                // Casting: group by character with labelled dividers (#6)
+                (() => {
+                  const groups = groupByCharacter(s.picks);
+                  return (
+                    <div className="space-y-6">
+                      {groups.map((g, gi) => (
+                        <div key={gi} style={{ breakInside: 'avoid' }}>
+                          {g.character ? (
+                            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-input-border">
+                              <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[13px] font-semibold">
+                                {g.character.label.replace(/_/g, ' ')}
+                              </span>
+                              <span className="text-[12px] text-[#8A8794]">{g.character.casting}</span>
+                            </div>
+                          ) : (
+                            groups.length > 1 && (
+                              <div className="mb-3 pb-2 border-b border-input-border">
+                                <span className="text-[13px] text-[#8A8794] font-medium">Other references</span>
+                              </div>
+                            )
+                          )}
+                          <div className="grid grid-cols-1 gap-5">
+                            {g.matches.map((m) => <PickCard key={m.reference_id} m={m} />)}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                ))}
-              </div>
+                  );
+                })()
+              ) : (
+                <div className="grid grid-cols-1 gap-5">
+                  {s.picks.map((m) => <PickCard key={m.reference_id} m={m} />)}
+                </div>
+              )}
             </section>
           ))
         )}
